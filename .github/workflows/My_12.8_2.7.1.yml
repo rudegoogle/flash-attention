@@ -1,1 +1,125 @@
 
+
+
+name: Build SageAttention Wheels for Windows CUDA 12.8 Pytorch 2.7.1
+
+on:
+  workflow_dispatch:  # Allows manual triggering
+
+
+jobs:
+  build-wheels:
+    runs-on: windows-latest  # Use Windows runner for compatibility
+    steps:
+      # Checkout the repository code
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      # Set up Python 3.13
+      - name: Set up Python 3.13.8
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13.5'
+
+      # Install CUDA 12.8
+      - name: Install CUDA Toolkit
+        uses: N-Storm/cuda-toolkit@v0.2.28 #Jimver/cuda-toolkit@v0.2.24 N-Storm/cuda-toolkit@v0.2.27m
+        with:
+          cuda: '12.8.1'
+          #method: 'network'
+          #sub-packages: '["nvcc", "cudart", "libcublas"]'  # Include necessary CUDA components
+          use-github-cache: false  # Disable caching to avoid path error
+          #use-local-cache: false  # Disable caching to avoid path error
+
+
+      # Install Visual Studio Build Tools for C++ compilation
+      #- name: Install Visual Studio Build Tools
+      #  run: |
+      #    choco install visualstudio2019buildtools --package-parameters "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
+      #  shell: powershell
+
+      # Install PyTorch 2.7.1 with CUDA 12.8
+      # pip install torch==2.7.1+cu128 torchvision==0.22.1+cu128 --index-url https://download.pytorch.org/whl/cu128
+      - name: Install PyTorch
+        run: |
+          pip install --upgrade torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cu128
+        shell: cmd
+
+      # Install Triton and wheel-building dependencies
+      - name: Install Build Tools
+      #  run: |
+      #    pip install triton>=3.0.0 wheel setuptools
+        run: |
+          pip install wheel setuptools packaging einops psutil ninja
+        shell: cmd
+        
+      - name: Install Triton
+        run: |
+          pip install -U "triton-windows<3.4"
+        shell: cmd
+
+      # Build SageAttention wheel
+      #- name: Build SageAttention Wheel
+      #  run: |
+      #    python setup.py bdist_wheel
+      #  shell: cmd
+      #  working-directory: ./
+
+      - name: Locate VS Build Tools
+        id: vs
+        shell: pwsh
+        run: |
+          $path = & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          # Ensure trailing backslash (if missing), and strip whitespace
+          if (-not $path.EndsWith("\")) { $path = "$path\" }
+          echo "VSINSTALLDIR=$($path.Trim())" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      
+      - name: Build SageAttention Wheel
+        shell: cmd
+        env:
+          DISTUTILS_USE_SDK: "1"
+        run: |
+          echo VSINSTALLDIR is "%VSINSTALLDIR%"
+          call "%VSINSTALLDIR%VC\Auxiliary\Build\vcvars64.bat"
+          echo PATH after vcvars:
+          echo %PATH%
+          where cl
+          dir "%VSINSTALLDIR%VC\Tools\MSVC"
+          python --version
+          python setup.py bdist_wheel
+        working-directory: ./
+      
+
+      # List generated wheels
+      - name: List Wheels
+        run: |
+          dir dist
+        shell: cmd
+
+      # Upload wheels as artifacts
+      - name: Upload Wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: sageattention-wheels
+          path: dist/*.whl
+
+      # Verify installations 
+      # python -c "import triton; print(triton.__version__)"
+      # pip install dist/*.whl
+      # python -c "import sageattention; print('SageAttention imported successfully')" 
+      - name: Verify Installations
+        run: |
+          nvcc --version
+          python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+        shell: cmd
+
+      # Optional: Run CogVideoX example
+      # name: Run CogVideoX Example
+      #  run: |
+      #    cd example
+      #    python cogvideox-2b.py --compile --attention_type sage
+      #  shell: cmd
+      #  env:
+      #    CUDA_LAUNCH_BLOCKING: 1
+      #  continue-on-error: true  # Example may require additional setup

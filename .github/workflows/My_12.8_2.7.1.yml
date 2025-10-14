@@ -89,7 +89,8 @@ jobs:
           echo "VSINSTALLDIR=$($path.Trim())" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       
-      - name: Build SageAttention Wheel
+      - name: Build FlashAttention Wheel
+        # python setup.py bdist_wheel
         shell: cmd
         env:
           DISTUTILS_USE_SDK: "1"
@@ -106,7 +107,7 @@ jobs:
           where cl
           dir "%VSINSTALLDIR%VC\Tools\MSVC"
           python --version
-          python setup.py bdist_wheel
+          pip wheel . --no-build-isolation -w dist 
         working-directory: ./
       
 

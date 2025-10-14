@@ -6,6 +6,8 @@ name: Build FlashAttention Wheels for Windows CUDA 12.8 Pytorch 2.7.1
 on:
   workflow_dispatch:  # Allows manual triggering
 
+permissions:
+  contents: write
 
 jobs:
   build-wheels:
@@ -95,6 +97,7 @@ jobs:
           FLASH_ATTENTION_FORCE_BUILD: "TRUE"
           FLASH_ATTENTION_FORCE_CXX11_ABI: "FALSE"
           BUILD_TARGET: "cuda"
+          VERBOSE: "1"
         run: |
           echo VSINSTALLDIR is "%VSINSTALLDIR%"
           call "%VSINSTALLDIR%VC\Auxiliary\Build\vcvars64.bat"

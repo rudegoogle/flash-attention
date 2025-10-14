@@ -1,7 +1,7 @@
 
 
 
-name: Build SageAttention Wheels for Windows CUDA 12.8 Pytorch 2.7.1
+name: Build FlashAttention Wheels for Windows CUDA 12.8 Pytorch 2.7.1
 
 on:
   workflow_dispatch:  # Allows manual triggering
@@ -21,9 +21,9 @@ jobs:
       # Checkout the repository code
       - name: Checkout code
         uses: actions/checkout@v5
-        with:
-          submodules: recursive
-          fetch-depth: 0        
+        #with:
+        #  submodules: recursive
+        #  fetch-depth: 0        
 
       # Set up Python 3.13
       - name: Set up Python 3.13.8
@@ -38,6 +38,7 @@ jobs:
           cuda: '12.8.1'
           #method: 'network'
           #sub-packages: '["nvcc", "cudart", "libcublas"]'  # Include necessary CUDA components
+          sub-packages: '["nvcc", "cudart", "cublas", "cufft", "curand", "cusolver", "cusparse", "visual_studio_integration"]'
           use-github-cache: false  # Disable caching to avoid path error
           #use-local-cache: false  # Disable caching to avoid path error
 
@@ -89,6 +90,10 @@ jobs:
         shell: cmd
         env:
           DISTUTILS_USE_SDK: "1"
+          MAX_JOBS: "1"
+          FLASH_ATTENTION_FORCE_BUILD: "TRUE"
+          FLASH_ATTENTION_FORCE_CXX11_ABI: "FALSE"
+          BUILD_TARGET: "cuda"
         run: |
           echo VSINSTALLDIR is "%VSINSTALLDIR%"
           call "%VSINSTALLDIR%VC\Auxiliary\Build\vcvars64.bat"

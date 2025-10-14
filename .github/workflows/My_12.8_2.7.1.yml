@@ -11,9 +11,19 @@ jobs:
   build-wheels:
     runs-on: windows-latest  # Use Windows runner for compatibility
     steps:
+      - name: Enable long paths
+        shell: pwsh
+        run: |
+          git config --system core.longpaths true
+          reg add HKLM\SYSTEM\CurrentControlSet\Control\FileSystem `
+              /v LongPathsEnabled /t REG_DWORD /d 1 /f
+              
       # Checkout the repository code
       - name: Checkout code
         uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          fetch-depth: 0        
 
       # Set up Python 3.13
       - name: Set up Python 3.13.8

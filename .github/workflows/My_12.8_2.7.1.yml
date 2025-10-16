@@ -101,6 +101,7 @@ jobs:
         shell: cmd
         env:
           DISTUTILS_USE_SDK: "1"
+          SETUPTOOLS_USE_DISTUTILS: "stdlib"
           MAX_JOBS: "1"
           FLASH_ATTENTION_FORCE_BUILD: "TRUE"
           FLASH_ATTENTION_FORCE_CXX11_ABI: "FALSE"

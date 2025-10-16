@@ -32,7 +32,7 @@ jobs:
       - name: Set up Python 3.13.8
         uses: actions/setup-python@v6
         with:
-          python-version: '3.13.5'
+          python-version: '3.13.8'
 
       # Install CUDA 12.8
       - name: Install CUDA Toolkit
@@ -64,7 +64,7 @@ jobs:
       #  run: |
       #    pip install triton>=3.0.0 wheel setuptools
         run: |
-          pip install wheel setuptools packaging einops psutil ninja
+          pip install wheel setuptools==75.8.0 packaging einops psutil ninja
         shell: cmd
         
       - name: Install Triton
@@ -108,7 +108,7 @@ jobs:
         shell: cmd
         env:
           DISTUTILS_USE_SDK: "1"
-          SETUPTOOLS_USE_DISTUTILS: "stdlib"
+          # SETUPTOOLS_USE_DISTUTILS: "stdlib"
           MAX_JOBS: "1"
           FLASH_ATTENTION_FORCE_BUILD: "TRUE"
           FLASH_ATTENTION_FORCE_CXX11_ABI: "FALSE"
@@ -124,7 +124,7 @@ jobs:
           where cl
           dir "%VSINSTALLDIR%VC\Tools\MSVC"
           python --version
-          pip wheel . --no-build-isolation -w dist --verbose
+          pip wheel . --no-build-isolation --no-deps -w dist --verbose
         working-directory: ./
       
 

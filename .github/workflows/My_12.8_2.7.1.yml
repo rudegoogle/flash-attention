@@ -88,6 +88,13 @@ jobs:
           if (-not $path.EndsWith("\")) { $path = "$path\" }
           echo "VSINSTALLDIR=$($path.Trim())" | Out-File -FilePath $env:GITHUB_ENV -Append
 
+      - name: Set CUDA environment variables
+        #echo "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8" | Out-File -FilePath $env:GITHUB_ENV -Append
+        #echo "PATH=$env:CUDA_HOME\bin;$env:CUDA_HOME\libnvvp;$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Append
+        shell: pwsh
+        run: |
+          echo "CUDA_HOME=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Verify CUDA setup
         shell: cmd
         run: |

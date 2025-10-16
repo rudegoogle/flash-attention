@@ -88,6 +88,12 @@ jobs:
           if (-not $path.EndsWith("\")) { $path = "$path\" }
           echo "VSINSTALLDIR=$($path.Trim())" | Out-File -FilePath $env:GITHUB_ENV -Append
 
+      - name: Verify CUDA setup
+        shell: cmd
+        run: |
+          echo CUDA_HOME=%CUDA_HOME%
+          echo CUDA_PATH=%CUDA_PATH%
+          nvcc --version
       
       - name: Build FlashAttention Wheel
         # python setup.py bdist_wheel
@@ -101,6 +107,7 @@ jobs:
           BUILD_TARGET: "cuda"
           NVCC_THREADS: "2"
           VERBOSE: "1"
+          TORCH_CUDA_ARCH_LIST: "8.9"
         run: |
           echo VSINSTALLDIR is "%VSINSTALLDIR%"
           call "%VSINSTALLDIR%VC\Auxiliary\Build\vcvars64.bat"
@@ -109,7 +116,7 @@ jobs:
           where cl
           dir "%VSINSTALLDIR%VC\Tools\MSVC"
           python --version
-          python setup.py bdist_wheel
+          pip wheel . --no-build-isolation -w dist --verbose
         working-directory: ./
       
 

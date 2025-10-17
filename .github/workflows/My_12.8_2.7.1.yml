@@ -131,13 +131,14 @@ jobs:
         env:
           DISTUTILS_USE_SDK: "1"
           # SETUPTOOLS_USE_DISTUTILS: "stdlib"
-          MAX_JOBS: "1"
+          MAX_JOBS: "2"
           FLASH_ATTENTION_FORCE_BUILD: "TRUE"
           FLASH_ATTENTION_FORCE_CXX11_ABI: "FALSE"
           BUILD_TARGET: "cuda"
           NVCC_THREADS: "2"
           VERBOSE: "1"
           TORCH_CUDA_ARCH_LIST: "8.9"
+          GPU_ARCHS: "sm_89"
           CMAKE_GENERATOR: "Ninja"
         run: |
           echo VSINSTALLDIR is "%VSINSTALLDIR%"

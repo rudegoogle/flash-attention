@@ -34,6 +34,22 @@ jobs:
         with:
           python-version: '3.13.8'
 
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Cache torch extensions
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/torch_extensions
+          key: ${{ runner.os }}-torch-ext-${{ hashFiles('**/setup.py', '**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-torch-ext-
+
       # Install CUDA 12.8
       - name: Install CUDA Toolkit
         uses: N-Storm/cuda-toolkit@v0.2.28 #Jimver/cuda-toolkit@v0.2.24 N-Storm/cuda-toolkit@v0.2.27m
@@ -66,7 +82,13 @@ jobs:
         run: |
           pip install wheel setuptools==75.8.0 packaging einops psutil ninja
         shell: cmd
-        
+
+      - name: Verify Ninja
+        shell: cmd
+        run: |
+          ninja --version
+          where ninja
+          
       - name: Install Triton
         run: |
           pip install -U "triton-windows<3.4"
@@ -116,6 +138,7 @@ jobs:
           NVCC_THREADS: "2"
           VERBOSE: "1"
           TORCH_CUDA_ARCH_LIST: "8.9"
+          CMAKE_GENERATOR: "Ninja"
         run: |
           echo VSINSTALLDIR is "%VSINSTALLDIR%"
           call "%VSINSTALLDIR%VC\Auxiliary\Build\vcvars64.bat"
@@ -151,6 +174,15 @@ jobs:
           python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
         shell: cmd
 
+      - name: Check CMake Generator
+        if: always()
+        shell: cmd
+        run: |
+          if exist build\CMakeCache.txt (
+            type build\CMakeCache.txt | findstr "CMAKE_GENERATOR"
+          ) else (
+            echo "No CMakeCache.txt found in build directory"
+          )
       # Optional: Run CogVideoX example
       # name: Run CogVideoX Example
       #  run: |

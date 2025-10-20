@@ -3,7 +3,8 @@
 import math
 import hashlib
 import inspect
-from typing import Type, Callable, Optional, Tuple
+import re
+from typing import Type, Callable, Optional, Tuple, overload
 from functools import partial
 
 import cutlass
@@ -102,7 +103,7 @@ def mma_make_fragment_B(
 
 
 def get_smem_store_atom(
-    arch: cutlass.Constexpr[int], element_type: Type[cute.Numeric]
+    arch: cutlass.Constexpr[int], element_type: Type[cute.Numeric], transpose: bool = False
 ) -> cute.CopyAtom:
     if const_expr(arch < 90 or element_type.width != 16):
         return cute.make_copy_atom(
@@ -112,7 +113,7 @@ def get_smem_store_atom(
         )
     else:
         return cute.make_copy_atom(
-            cute.nvgpu.warp.StMatrix8x8x16bOp(transpose=False, num_matrices=4),
+            cute.nvgpu.warp.StMatrix8x8x16bOp(transpose=transpose, num_matrices=4),
             element_type,
         )
 
@@ -135,37 +136,39 @@ def warp_reduce(
     return val
 
 
-def convert_layout_acc_mn(acc_layout: cute.Layout) -> cute.Layout:
+def convert_layout_acc_mn(acc_layout: cute.Layout, transpose: bool = False) -> cute.Layout:
     """
     For Sm80, convert ((2, 2), MMA_M, MMA_N, ...) to ((2, MMA_M), (2, MMA_N), ...).
     For Sm90, convert ((2, 2, V), MMA_M, MMA_N, ...) to ((2, MMA_M), (2, V, MMA_N), ...).
     """
     acc_layout_col_major = cute.make_layout(acc_layout.shape)
-    acc_layout_mn = cute.make_layout(
+    shape = (
+        (acc_layout_col_major.shape[0][1], acc_layout_col_major.shape[1]),  # MMA_M
         (
-            (acc_layout_col_major.shape[0][1], acc_layout_col_major.shape[1]),  # MMA_M
-            (
-                acc_layout_col_major.shape[0][0],
-                *acc_layout_col_major.shape[0][2:],
-                acc_layout_col_major.shape[2],
-            ),  # MMA_N
-            *acc_layout_col_major.shape[3:],
-        ),
-        stride=(
-            (acc_layout_col_major.stride[0][1], acc_layout_col_major.stride[1]),  # MMA_M
-            (
-                acc_layout_col_major.stride[0][0],
-                *acc_layout_col_major.stride[0][2:],
-                acc_layout_col_major.stride[2],
-            ),  # MMA_N
-            *acc_layout_col_major.stride[3:],
-        ),
+            acc_layout_col_major.shape[0][0],
+            *acc_layout_col_major.shape[0][2:],
+            acc_layout_col_major.shape[2],
+        ),  # MMA_N
+        *acc_layout_col_major.shape[3:],
     )
+    stride = (
+        (acc_layout_col_major.stride[0][1], acc_layout_col_major.stride[1]),  # MMA_M
+        (
+            acc_layout_col_major.stride[0][0],
+            *acc_layout_col_major.stride[0][2:],
+            acc_layout_col_major.stride[2],
+        ),  # MMA_N
+        *acc_layout_col_major.stride[3:],
+    )
+    if const_expr(transpose):
+        shape = (shape[1], shape[0], *shape[2:])
+        stride = (stride[1], stride[0], *stride[2:])
+    acc_layout_mn = cute.make_layout(shape, stride=stride)
     return cute.composition(acc_layout, acc_layout_mn)
 
 
-def make_acc_tensor_mn_view(acc: cute.Tensor) -> cute.Tensor:
-    return cute.make_tensor(acc.iterator, convert_layout_acc_mn(acc.layout))
+def make_acc_tensor_mn_view(acc: cute.Tensor, transpose: bool = False) -> cute.Tensor:
+    return cute.make_tensor(acc.iterator, convert_layout_acc_mn(acc.layout, transpose=transpose))
 
 
 @cute.jit
@@ -208,6 +211,10 @@ def convert_layout_acc_frgA(acc_layout: cute.Layout) -> cute.Layout:
     return rA_mma_view
 
 
+def make_acc_tensor_frgA_view(acc: cute.Tensor) -> cute.Tensor:
+    return cute.make_tensor(acc.iterator, convert_layout_acc_frgA(acc.layout))
+
+
 def select(a: cute.Tensor, mode: list[int]) -> cute.Tensor:
     return cute.make_tensor(a.iterator, cute.select(a.layout, mode))
 
@@ -215,8 +222,34 @@ def select(a: cute.Tensor, mode: list[int]) -> cute.Tensor:
 def transpose_view(a: cute.Tensor) -> cute.Tensor:
     """Transpose the first two dimensions of a tensor on smem."""
     shape = (a.shape[1], a.shape[0], *a.shape[2:])
-    order = (1, 0, *range(2, cute.rank(a)))
-    return cute.composition(a, cute.make_ordered_layout(shape, order=order))
+    # order = (1, 0, *range(2, cute.rank(a)))
+    # return cute.composition(a, cute.make_ordered_layout(shape, order=order))
+    stride = (a.layout.stride[1], a.layout.stride[0], *a.layout.stride[2:])
+    return cute.make_tensor(a.iterator, cute.make_layout(shape, stride=stride))
+
+
+def parse_swizzle_from_pointer(ptr: cute.Pointer) -> cute.Swizzle:
+    """Extract swizzle parameters from a pointer's swizzle_type.
+
+    The swizzle_type string has the form '!cute.swizzle<"S<b,m,s>">' where
+    b, m, s are the swizzle parameters (bits, base, shift).
+
+    Returns:
+        A cute.Swizzle object constructed from the extracted parameters
+
+    Raises:
+        ValueError: If the swizzle_type string cannot be parsed
+    """
+    # Ideally there should be a better API to get swizzle parameters, but we'll just parse
+    # the string here.
+    swizzle_str = str(ptr.type.swizzle_type)
+    # Extract the inner part "S<b,m,s>"
+    match = re.search(r'S<(\d+),(\d+),(\d+)>', swizzle_str)
+    if match:
+        b, m, s = int(match.group(1)), int(match.group(2)), int(match.group(3))
+        return cute.make_swizzle(b, m, s)
+    else:
+        raise ValueError(f"Could not parse swizzle_type: {swizzle_str}")
 
 
 @cute.jit
@@ -511,16 +544,40 @@ def cvt_f16x2_f32(a: float | Float32, b: float | Float32, to_dtype: Type, *, loc
     )
 
 
+@overload
+def cvt_f16(src: cute.Tensor, dst: cute.Tensor) -> None: ...
+
+@overload
+def cvt_f16(src: cute.Tensor, dtype: Type[cute.Numeric]) -> cute.Tensor: ...
+
 @cute.jit
-def cvt_f16(src: cute.Tensor, dst: cute.Tensor):
-    assert cute.size(dst.shape) == cute.size(src.shape), "dst and src must have the same size"
-    assert cute.size(src.shape) % 2 == 0, "src must have an even number of elements"
-    assert dst.element_type in [cutlass.BFloat16, cutlass.Float16], "dst must be BFloat16 or Float16"
-    assert src.element_type is Float32, "src must be Float32"
-    dst_i32 = cute.recast_tensor(dst, cutlass.Int32)
-    assert cute.size(dst_i32.shape) * 2 == cute.size(src.shape)
-    for i in cutlass.range_constexpr(cute.size(dst_i32)):
-        dst_i32[i] = cvt_f16x2_f32(src[2 * i], src[2 * i + 1], dst.element_type)
+def cvt_f16(src: cute.Tensor, dst_or_dtype):
+    """Convert Float32 tensor to Float16/BFloat16.
+
+    Args:
+        src: Source tensor with Float32 element type
+        dst_or_dtype: Either a destination tensor or a dtype (Float16/BFloat16)
+
+    Returns:
+        None if dst is a tensor, or a new tensor if dtype is provided
+    """
+    if const_expr(isinstance(dst_or_dtype, type)):
+        # dtype variant: create new tensor and call the tensor variant
+        dtype = dst_or_dtype
+        dst = cute.make_fragment(src.shape, dtype)
+        cvt_f16(src, dst)
+        return dst
+    else:
+        # tensor variant: write to dst
+        dst = dst_or_dtype
+        assert cute.size(dst.shape) == cute.size(src.shape), "dst and src must have the same size"
+        assert cute.size(src.shape) % 2 == 0, "src must have an even number of elements"
+        assert dst.element_type in [cutlass.BFloat16, cutlass.Float16], "dst must be BFloat16 or Float16"
+        assert src.element_type is Float32, "src must be Float32"
+        dst_i32 = cute.recast_tensor(dst, cutlass.Int32)
+        assert cute.size(dst_i32.shape) * 2 == cute.size(src.shape)
+        for i in cutlass.range_constexpr(cute.size(dst_i32)):
+            dst_i32[i] = cvt_f16x2_f32(src[2 * i], src[2 * i + 1], dst.element_type)
 
 
 @cute.jit

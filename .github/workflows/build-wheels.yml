@@ -5,14 +5,14 @@ on:
     inputs:
       version:
         description: 'Version tag of flash-attention to build: (format: v2.3.4/v2.3.4.post1)'
-        default: 'v2.3.4'
+        default: 'v2.8.3'
         required: true
         type: string
   workflow_call:
     inputs:
       version:
         description: 'Version tag of flash-attention to build (format: v2.3.4/v2.3.4.post1)'
-        default: 'v2.3.4'
+        default: 'v2.8.3'
         required: true
         type: string
 
@@ -27,20 +27,12 @@ jobs:
       fail-fast: false
       matrix:
         os: ["windows-2022"]
-        pyver: ["3.10", "3.11", "3.12", "3.13"]
-        cuda: ["12.4.1", "12.8.1"]
-        torchver: ["2.6.0", "2.7.0", "2.8.0"]
+        pyver: ["3.13"]
+        cuda: ["12.8.1", "13.0.1"]
+        torchver: ["2.7.1", "2.9.0"]
         exclude:
-          - torchver: '2.5.1'
-            pyver: '3.13'
-          - torchver: '2.5.1'
-            cuda: '12.8.1'
-          - torchver: '2.6.0'
-            cuda: '12.8.1'
-          - torchver: '2.7.0'
-            cuda: '12.4.1'
-          - torchver: '2.8.0'
-            cuda: '12.4.1'
+          - torchver: '2.7.1'
+            cuda: '13.0.1'
     defaults:
       run:
         shell: pwsh
@@ -58,24 +50,25 @@ jobs:
         if: runner.os == 'Windows'
 
       - name: Install Windows CUDA ${{ matrix.cuda }}
-        uses: Jimver/cuda-toolkit@v0.2.23
+        #method: "network"
+        uses: N-Storm/cuda-toolkit@v0.2.28
         id: cuda-toolkit-win
         with:
           cuda: "${{ matrix.cuda }}"
-          method: "network"
+          use-github-cache: false
           sub-packages: '["nvcc", "cudart", "cublas", "cufft", "curand", "cusolver", "cusparse", "visual_studio_integration"]'
         if: runner.os == 'Windows'
 
       # From FA2 repo
-      - name: Install Linux CUDA ${{ matrix.cuda }}
-        uses: Jimver/cuda-toolkit@v0.2.23
-        id: cuda-toolkit-Linux
-        with:
-          cuda: "${{ matrix.cuda }}"
-          linux-local-args: '["--toolkit"]'
-          method: "network"
-          sub-packages: '["nvcc"]'
-        if: runner.os != 'Windows'
+      #- name: Install Linux CUDA ${{ matrix.cuda }}
+      #  uses: Jimver/cuda-toolkit@v0.2.23
+      #  id: cuda-toolkit-Linux
+      #  with:
+      #    cuda: "${{ matrix.cuda }}"
+      #    linux-local-args: '["--toolkit"]'
+      #    method: "network"
+      #    sub-packages: '["nvcc"]'
+      #  if: runner.os != 'Windows'
 
       - name: Install the latest version of uv and set the python version
         uses: astral-sh/setup-uv@v5

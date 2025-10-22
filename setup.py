@@ -262,6 +262,8 @@ if not SKIP_CUDA_BUILD and not IS_ROCM:
     "--expt-relaxed-constexpr",
     "--expt-extended-lambda",
     "--use_fast_math",
+    "-D_WIN32=1",
+    "-DUSE_CUDA=1"
     # "--ptxas-options=-v",
     # "--ptxas-options=-O2",
     # "-lineinfo",

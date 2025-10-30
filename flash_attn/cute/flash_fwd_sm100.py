@@ -33,6 +33,7 @@ from flash_attn.cute.mask import AttentionMask
 from flash_attn.cute.softmax import SoftmaxSm100, apply_score_mod_inner
 from flash_attn.cute.seqlen_info import SeqlenInfoQK
 from flash_attn.cute.block_info import BlockInfo
+from flash_attn.cute.block_sparsity import BlockSparseTensors
 from flash_attn.cute.pack_gqa import PackGQA
 from flash_attn.cute import mma_sm100_desc as sm100_desc
 from flash_attn.cute import blackwell_helpers as sm100_utils
@@ -160,7 +161,8 @@ class FlashAttentionForwardSm100:
             self.num_regs_correction = 64
             self.num_regs_other = 48
         else:
-            self.num_regs_softmax = 192 if self.is_causal or self.is_local else 184
+            # self.num_regs_softmax = 192 if self.is_causal or self.is_local else 184
+            self.num_regs_softmax = 200
             # self.num_regs_softmax = 176
             # self.num_regs_correction = 96
             # self.num_regs_correction = 80
@@ -169,9 +171,9 @@ class FlashAttentionForwardSm100:
             # self.num_regs_other = 32
             # self.num_regs_other = 64
             # self.num_regs_other = 80
-            # self.num_regs_other = 48
+            self.num_regs_other = 48
             # self.num_regs_other = 96 if self.is_causal or self.is_local else 80
-            self.num_regs_other = 64 if self.is_causal or self.is_local else 80
+            # self.num_regs_other = 64 if self.is_causal or self.is_local else 80
         self.num_regs_empty = 24
 
         self.buffer_align_bytes = 1024
@@ -223,9 +225,8 @@ class FlashAttentionForwardSm100:
         window_size_left: Int32 | int | None = None,
         window_size_right: Int32 | int | None = None,
         learnable_sink: Optional[cute.Tensor] = None,
-        aux_tensors: Optional[
-            list
-        ] = None,  # Not typing for now since conversion behaves a lil funny
+        blocksparse_tensors: Optional[BlockSparseTensors] = None,
+        aux_tensors: Optional[list] = None,
     ):
         """Execute the Fused Multi-Head Attention operation on the provided tensors.
 
@@ -240,7 +241,6 @@ class FlashAttentionForwardSm100:
         5. Grid and work scheduling computation
         6. Kernel launch with appropriate parameters
         """
-
         # setup static attributes before smem/grid/tma computation
         self.q_dtype = mQ.element_type
         self.k_dtype = mK.element_type
@@ -1171,11 +1171,9 @@ class FlashAttentionForwardSm100:
         SeqlenInfoCls: Callable,
         TileSchedulerCls: Callable,
     ):
-        thr_mma_qk = tiled_mma_qk.get_slice(0)  # default 1SM
-        thr_mma_pv = tiled_mma_pv.get_slice(0)  # default 1SM
-        tSrQ = thr_mma_qk.make_fragment_A(sQ)
-        tSrK = thr_mma_qk.make_fragment_B(sK)
-        tOrV = thr_mma_pv.make_fragment_B(sV)
+        tSrQ = tiled_mma_qk.make_fragment_A(sQ)
+        tSrK = tiled_mma_qk.make_fragment_B(sK)
+        tOrV = tiled_mma_pv.make_fragment_B(sV)
         if const_expr(self.q_stage == 2):
             tSrQs = (tSrQ[None, None, None, 0], tSrQ[None, None, None, 1])
         else:
@@ -1966,7 +1964,7 @@ class FlashAttentionForwardSm100:
             tOtO_t2r_i = cute.make_tensor(tOtO_t2r.iterator + i * corr_tile_size, tOtO_t2r.layout)
             cute.copy(thr_tmem_load, tOtO_t2r_i, tOrO_frg)
             for j in cutlass.range(0, cute.size(tOrO_frg), 2, unroll_full=True):
-                tOrO_frg[j], tOrO_frg[j + 1] = cute.arch.mul_packed_f32x2(
+                tOrO_frg[j], tOrO_frg[j + 1] = utils.mul_packed_f32x2(
                     (tOrO_frg[j], tOrO_frg[j + 1]),
                     (scale, scale),
                 )
@@ -2041,7 +2039,7 @@ class FlashAttentionForwardSm100:
             tOrO_frg = cute.make_fragment(tOcO_t2r[None, 0, 0, i].shape, self.pv_acc_dtype)
             cute.copy(tiled_tmem_load, tOtO_t2r_i, tOrO_frg)
             for j in cutlass.range_constexpr(0, cute.size(tOrO_frg), 2):
-                tOrO_frg[j], tOrO_frg[j + 1] = cute.arch.mul_packed_f32x2(
+                tOrO_frg[j], tOrO_frg[j + 1] = utils.mul_packed_f32x2(
                     (tOrO_frg[j], tOrO_frg[j + 1]),
                     (scale, scale),
                 )

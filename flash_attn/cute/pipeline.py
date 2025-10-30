@@ -154,6 +154,7 @@ class PipelineTmaAsync(PipelineTmaAsyncOg):
         barrier_storage: cute.Pointer = None,
         cta_layout_vmnk: Optional[cute.Layout] = None,
         tidx: Optional[Int32] = None,
+        mcast_mode_mn: tuple[int, int] = (1, 1),
         init_wait: cutlass.Constexpr[bool] = True,
     ):
         """
@@ -172,6 +173,8 @@ class PipelineTmaAsync(PipelineTmaAsyncOg):
         :type cta_layout_vmnk: cute.Layout | None
         :param tidx: thread index to consumer async threads
         :type tidx: Int32 | None
+        :param mcast_mode_mn: Tuple of two integers, specifying whether mcast is enabled for the m and n modes. At least one of the two integers must be 1.
+        :type mcast_mode_mn: tuple[int, int]
         """
         if not isinstance(barrier_storage, cute.Pointer):
             raise ValueError(
@@ -201,7 +204,9 @@ class PipelineTmaAsync(PipelineTmaAsyncOg):
             (
                 dst_rank,
                 is_signalling_thread,
-            ) = PipelineTmaAsync.init_empty_barrier_arrive_signal(cta_layout_vmnk, tidx)
+            ) = PipelineTmaAsync.init_empty_barrier_arrive_signal(
+                cta_layout_vmnk, tidx, mcast_mode_mn
+            )
 
         producer_mask = None
 
@@ -264,6 +269,7 @@ class PipelineTmaUmma(PipelineTmaUmmaOg):
         tx_count: int,
         barrier_storage: cute.Pointer = None,
         cta_layout_vmnk: Optional[cute.Layout] = None,
+        mcast_mode_mn: tuple[int, int] = (1, 1),
         init_wait: cutlass.Constexpr[bool] = True,
     ):
         """
@@ -280,6 +286,8 @@ class PipelineTmaUmma(PipelineTmaUmmaOg):
         :type tx_count: int
         :param cta_layout_vmnk: Layout of the cluster shape
         :type cta_layout_vmnk: cute.Layout | None
+        :param mcast_mode_mn: Tuple of two integers, specifying whether mcast is enabled for the m and n modes. At least one of the two integers must be 1.
+        :type mcast_mode_mn: tuple[int, int]
         """
         if not isinstance(barrier_storage, cute.Pointer):
             raise ValueError(
@@ -305,7 +313,9 @@ class PipelineTmaUmma(PipelineTmaUmmaOg):
             # All threadblocks are leaders if not using clusters
             is_leader_cta = True
         else:
-            producer_mask = PipelineTmaUmma._compute_mcast_arrival_mask(cta_layout_vmnk)
+            producer_mask = PipelineTmaUmma._compute_mcast_arrival_mask(
+                cta_layout_vmnk, mcast_mode_mn
+            )
             is_leader_cta = PipelineTmaUmma._compute_is_leader_cta(cta_layout_vmnk)
 
         cta_group = (

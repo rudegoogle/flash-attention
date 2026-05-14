@@ -1,9 +1,13 @@
 import math
+from contextlib import nullcontext
+from functools import wraps
 from typing import Optional
 
 import torch
 import torch.nn.functional as F
 from einops import rearrange, repeat
+from torch._guards import active_fake_mode
+from torch._subclasses.fake_tensor import FakeTensorMode
 
 
 class IndexFirstAxis(torch.autograd.Function):
@@ -63,8 +67,15 @@ def unpad_input(hidden_states, attention_mask, unused_mask=None):
     all_masks = (attention_mask + unused_mask) if unused_mask is not None else attention_mask
     seqlens_in_batch = all_masks.sum(dim=-1, dtype=torch.int32)
     used_seqlens_in_batch = attention_mask.sum(dim=-1, dtype=torch.int32)
-    indices = torch.nonzero(all_masks.flatten(), as_tuple=False).flatten()
-    max_seqlen_in_batch = seqlens_in_batch.max().item()
+    in_fake_mode = active_fake_mode() is not None
+    if not in_fake_mode:
+        indices = torch.nonzero(all_masks.flatten(), as_tuple=False).flatten()
+        max_seqlen_in_batch = seqlens_in_batch.max().item()
+    else:
+        # torch.nonzero and .item() are not supported in FakeTensorMode
+        batch_size, seqlen = attention_mask.shape
+        indices = torch.arange(batch_size * seqlen, device=hidden_states.device)
+        max_seqlen_in_batch = seqlen
     cu_seqlens = F.pad(torch.cumsum(seqlens_in_batch, dim=0, dtype=torch.int32), (1, 0))
     return (
         index_first_axis(rearrange(hidden_states, "b s ... -> (b s) ..."), indices),
@@ -80,20 +91,23 @@ def pad_input(hidden_states, indices, batch, seqlen):
     return rearrange(output, "(b s) ... -> b s ...", b=batch)
 
 
-def generate_random_padding_mask(max_seqlen, batch_size, device, mode="random", zero_lengths=False):
+def generate_random_padding_mask(
+    max_seqlen, batch_size, device, mode="random", zero_lengths=False, min_seqlen=None
+):
     assert mode in ["full", "random", "third"]
+    min_seqlen = min_seqlen if min_seqlen is not None else 0 if zero_lengths else 1
     if mode == "full":
         lengths = torch.full((batch_size, 1), max_seqlen, device=device, dtype=torch.int32)
     elif mode == "random":
         lengths = torch.randint(
-            max(0 if zero_lengths else 1, max_seqlen - 20),
+            max(min_seqlen, max_seqlen - 20),
             max_seqlen + 1,
             (batch_size, 1),
             device=device,
         )
     else:
         lengths = torch.randint(
-            max(0 if zero_lengths else 1, max_seqlen // 3),
+            max(min_seqlen, max_seqlen // 3),
             max_seqlen + 1,
             (batch_size, 1),
             device=device,
@@ -332,6 +346,8 @@ def attention_ref(
     upcast=True,
     reorder_ops=False,
     intermediate_dtype=None,
+    return_lse=False,
+    gather_kv_indices=None,
 ):
     if causal:
         window_size = (window_size[0], 0)
@@ -388,10 +404,21 @@ def attention_ref(
         local_mask = (
             torch.logical_or(local_mask, chunk_mask) if local_mask is not None else chunk_mask
         )
+    if gather_kv_indices is not None:
+        batch = q.shape[0]
+        topk_len = gather_kv_indices.shape[2]
+        if topk_len < seqlen_k:
+            topk_index_mask = torch.full(
+                (batch, seqlen_q, seqlen_k), False, device="cuda"
+            ).scatter_(-1, gather_kv_indices, True)
+            scores.masked_fill_(rearrange(~topk_index_mask, "b t s -> b 1 t s"), float("-inf"))
     if local_mask is not None:
         scores.masked_fill_(local_mask, float("-inf"))
     if attn_bias is not None:
         scores = scores + attn_bias
+    # After all masks are applied, before softmax:
+    # scores shape: [b, h, t, s]
+    lse = torch.logsumexp(scores, dim=-1)  # [b, h, t]
     if learnable_sink is None:
         attention = torch.softmax(scores, dim=-1).to(v.dtype)
     else:
@@ -403,6 +430,8 @@ def attention_ref(
         normalizer = unnormalized_scores.sum(dim=-1, keepdim=True) + torch.exp(
             learnable_sink - logits_or_sinks_max
         )
+        # LSE with sink: log(Z) = log(normalizer) + max
+        lse = (torch.log(normalizer.squeeze(-1)) + logits_or_sinks_max.squeeze(-1)).to(dtype_og)
         attention = (unnormalized_scores / normalizer).to(v.dtype)
     if query_padding_mask is not None:
         attention = attention.masked_fill(rearrange(~query_padding_mask, "b s -> b 1 s 1"), 0.0)
@@ -420,4 +449,28 @@ def attention_ref(
     output = torch.einsum("bhts,bshd->bthd", attention_drop, v * dropout_scaling)
     if query_padding_mask is not None:
         output.masked_fill_(rearrange(~query_padding_mask, "b s -> b s 1 1"), 0.0)
+    if return_lse:
+        return output.to(dtype_og), attention.to(dtype_og), lse.to(dtype_og)
     return output.to(dtype=dtype_og), attention.to(dtype=dtype_og)
+
+
+def maybe_fake_tensor_mode(fake: bool = True):
+    """
+    One way to populate/pre-compile cache is to use torch fake tensor mode,
+    which does not allocate actual GPU tensors but retains tensor shape/dtype
+    metadata for cute.compile.
+    """
+
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            with FakeTensorMode() if fake else nullcontext():
+                return fn(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def is_fake_mode() -> bool:
+    return active_fake_mode() is not None

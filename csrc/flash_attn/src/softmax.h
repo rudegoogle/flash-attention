@@ -62,6 +62,32 @@ __device__ __forceinline__ void reduce_sum(Tensor<Engine0, Layout0> const& tenso
     thread_reduce_<zero_init>(tensor, sum, sum_op);
 }
 
+// Packed FMA helper (Plan A-2): computes (d0,d1) = (a0*b0+c0, a1*b1+c1).
+// On sm_100+ (Blackwell), emits a single fma.rn.f32x2 instruction.
+// Falls back to two plain FMAs on older arches and when UNFUSE_FMA is set.
+__forceinline__ __device__ void fma_f32x2(
+    float &d0, float &d1,
+    float a0, float a1,
+    float b0, float b1,
+    float c0, float c1) {
+#if __CUDA_ARCH__ >= 1000 && !defined(UNFUSE_FMA)
+    asm volatile(
+        "{\n\t"
+        ".reg .b64 ra, rb, rc, rd;\n\t"
+        "mov.b64 ra, {%2, %3};\n\t"
+        "mov.b64 rb, {%4, %5};\n\t"
+        "mov.b64 rc, {%6, %7};\n\t"
+        "fma.rn.f32x2 rd, ra, rb, rc;\n\t"
+        "mov.b64 {%0, %1}, rd;\n\t"
+        "}\n"
+        : "=f"(d0), "=f"(d1)
+        : "f"(a0), "f"(a1), "f"(b0), "f"(b1), "f"(c0), "f"(c1));
+#else
+    d0 = fmaf(a0, b0, c0);
+    d1 = fmaf(a1, b1, c1);
+#endif
+}
+
 // Apply the exp to all the elements.
 template <bool Scale_max=true, typename Engine0, typename Layout0, typename Engine1, typename Layout1>
 __forceinline__ __device__ void scale_apply_exp2(Tensor<Engine0, Layout0> &tensor, Tensor<Engine1, Layout1> const &max, const float scale) {
@@ -74,6 +100,27 @@ __forceinline__ __device__ void scale_apply_exp2(Tensor<Engine0, Layout0> &tenso
         // We don't want (-inf - (-inf)) since that would give NaN.
         // If we don't have float around M_LOG2E the multiplication is done in fp64.
         const float max_scaled = max(mi) == -INFINITY ? 0.f : max(mi) * (Scale_max ? scale : float(M_LOG2E));
+#if __CUDA_ARCH__ >= 1000 && !defined(UNFUSE_FMA)
+        // Plan A-2: on sm_100+ (Blackwell), pair-process columns via fma.rn.f32x2.
+        // The pre-exp2f term is fma(t, scale, -max_scaled); fma.rn.f32x2 does two
+        // such FMAs in one instruction. exp2f itself stays scalar (MUFU.EX2 has
+        // no f32x2 form). Rounding mode .rn matches scalar fmaf default.
+        const float neg_max_scaled = -max_scaled;
+        constexpr int N1 = decltype(size<1>(tensor))::value;
+        #pragma unroll
+        for (int ni = 0; ni < N1 - 1; ni += 2) {
+            float t0 = tensor(mi, ni);
+            float t1 = tensor(mi, ni + 1);
+            float r0, r1;
+            fma_f32x2(r0, r1, t0, t1, scale, scale, neg_max_scaled, neg_max_scaled);
+            tensor(mi, ni)     = exp2f(r0);
+            tensor(mi, ni + 1) = exp2f(r1);
+        }
+        if constexpr (N1 % 2 != 0) {
+            constexpr int last = N1 - 1;
+            tensor(mi, last) = exp2f(tensor(mi, last) * scale - max_scaled);
+        }
+#else
         #pragma unroll
         for (int ni = 0; ni < size<1>(tensor); ++ni)  {
             // Instead of computing exp(x - max), we compute exp2(x * log_2(e) -
@@ -88,6 +135,7 @@ __forceinline__ __device__ void scale_apply_exp2(Tensor<Engine0, Layout0> &tenso
                 tensor(mi, ni) = exp2f(tensor(mi, ni) * scale - max_scaled);
             #endif
         }
+#endif
     }
 }
 
@@ -133,7 +181,7 @@ struct Softmax {
 
     __forceinline__ __device__ Softmax() {};
 
-    template<bool Is_first, bool Check_inf=false, typename Tensor0, typename Tensor1>
+    template<bool Is_first, bool Check_inf=false, bool Use_rescale_threshold=false, typename Tensor0, typename Tensor1>
     __forceinline__ __device__ void softmax_rescale_o(Tensor0 &acc_s, Tensor1 &acc_o, float softmax_scale_log2) {
         // Reshape acc_s from (MMA=4, MMA_M, MMA_N) to (nrow=(2, MMA_M), ncol=(2, MMA_N))
         Tensor scores = make_tensor(acc_s.data(), FLASH_NAMESPACE::convert_layout_acc_rowcol(acc_s.layout()));
@@ -154,7 +202,16 @@ struct Softmax {
                 float scores_max_cur = !Check_inf
                     ? row_max(mi)
                     : (row_max(mi) == -INFINITY ? 0.0f : row_max(mi));
-                float scores_scale = exp2f((scores_max_prev(mi) - scores_max_cur) * softmax_scale_log2);
+                float scaled_diff = (scores_max_prev(mi) - scores_max_cur) * softmax_scale_log2;
+                // Optionally skip the O / row_sum rescale when the new row_max is virtually
+                // the same as the previous one (scaled_diff is a very small negative number,
+                // so scores_scale = exp2(scaled_diff) ~= 1.0). The threshold -0.01 corresponds
+                // to scores_scale >= ~0.993 (worst-case relative error <= 0.7%).
+                if constexpr (Use_rescale_threshold) {
+                    constexpr float kRescaleSkipThreshold = -0.01f;
+                    if (scaled_diff >= kRescaleSkipThreshold) { continue; }
+                }
+                float scores_scale = exp2f(scaled_diff);
                 row_sum(mi) *= scores_scale;
                 #pragma unroll
                 for (int ni = 0; ni < size<1>(acc_o_rowcol); ++ni) { acc_o_rowcol(mi, ni) *= scores_scale; }

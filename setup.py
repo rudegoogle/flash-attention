@@ -328,8 +328,16 @@ if not SKIP_CUDA_BUILD and not IS_ROCM:
     compiler_c17_flag=["-O3", "-std=c++17"]
     # Add Windows-specific flags
     if sys.platform == "win32" and os.getenv('DISTUTILS_USE_SDK') == '1':
-        nvcc_flags.extend(["-Xcompiler", "/Zc:__cplusplus"])
-        compiler_c17_flag=["-O2", "/std:c++17", "/Zc:__cplusplus"]
+        # CUDA 13.2 CCCL headers require MSVC conforming preprocessor (see md/CUDA_13.0_TO_13.2_BUILD_FIX.md).
+        nvcc_flags.extend(
+            ["-Xcompiler", "/Zc:__cplusplus", "-Xcompiler", "/Zc:preprocessor"]
+        )
+        compiler_c17_flag = [
+            "-O2",
+            "/std:c++17",
+            "/Zc:__cplusplus",
+            "/Zc:preprocessor",
+        ]
 
     ext_modules.append(
         CUDAExtension(

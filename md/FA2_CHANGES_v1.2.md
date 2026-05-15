@@ -174,6 +174,6 @@ This marks the fork feature line for **v1.2**. The upstream package may continue
 ## Build / compatibility notes
 
 - **PyTorch:** **`>=2.10` required** — enforced in `setup.py` `install_requires` as `torch>=2.10` on the CUDA wheel path. Extension code uses `<torch/extension.h>` (PyTorch 2.10+ layout). Wheels and local builds are commonly tested with **2.12+cu132**; the validation guide also documents runs on **2.11.0+cu130**.
-- **CUDA:** Toolkit **>=13.0** for native compilation; **13.2** is used for cu132 PyTorch builds. Default `FLASH_ATTN_CUDA_ARCHS` in `setup.py`: `80;90;100;110;120` (Ampere through Blackwell).
+- **CUDA:** Toolkit **>=13.0** for native compilation; **13.2** is used for cu132 PyTorch builds. Default `FLASH_ATTN_CUDA_ARCHS` in `setup.py`: `80;90;100;120` (Ampere, Hopper, Blackwell datacenter/consumer — **no sm_110 / Thor** in the fork default).
 - **Windows:** Supported. FA4 (CuTeDSL) remains unavailable on Windows due to missing `win_amd64` native libraries. MSVC host compiles invoked by `nvcc` need `/Zc:preprocessor` (see `setup.py` when `DISTUTILS_USE_SDK=1`).
 - **Fallback:** A-1 is gated by the `Use_rescale_threshold` template flag at each call site. A-2 is gated by `#if __CUDA_ARCH__ >= 1000` inside `scale_apply_exp2` / `fma_f32x2`, so one binary runs on Ampere, Hopper, and Blackwell.

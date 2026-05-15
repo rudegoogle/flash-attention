@@ -6,16 +6,18 @@ This repository uses separate tag lanes so FA2 and FA4 publishing do not collide
 
 | Tag pattern | Workflow | Package target | Version source |
 | --- | --- | --- | --- |
-| `v*` | `.github/workflows/publish.yml` | Root package (`flash-attn`) | Root package version metadata |
-| `fa4-v*` | `.github/workflows/publish-fa4.yml` | `flash_attn/cute` sdist/wheel artifacts on GitHub Release only (no PyPI) | `setuptools-scm` with `fa4-v*` tags |
+| `v*` | *(disabled — no GitHub Actions workflow)* | Root package (`flash-attn`) | Build wheels locally; upload releases manually if needed |
+| `fa4-v*` | *(not present in this fork)* | — | — |
 
 ## How to publish
 
 ### FA2 / root package lane
 
-1. Create a tag matching `v*` (example: `v2.9.0`).
-2. Push that tag.
-3. `publish.yml` creates a release, builds wheel matrix artifacts, and publishes to PyPI.
+**GitHub Actions `Build wheels and deploy` is removed.** Pushing `v*` tags no longer starts CI wheel builds or PyPI publish.
+
+1. Build wheels locally (for example `WindowsWhlBuilder_cuda.bat` on Windows).
+2. Create a GitHub Release manually and attach artifacts if you want a release page.
+3. Do not push `v*` tags expecting automated builds unless you restore a workflow file intentionally.
 
 ### FA4 / CUTE package lane
 

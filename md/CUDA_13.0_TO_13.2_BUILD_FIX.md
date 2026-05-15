@@ -7,7 +7,7 @@ This document records how **FlashAttention 2.9.0 (fork v1.2)** was built on **Wi
 - Wheel: `dist/flash_attn-2.9.0+cu132torch2.12.0cxx11abiTRUE-cp313-cp313-win_amd64.whl`
 - Built: **2026-05-15 19:39:32** (local time)
 - GPU tested: **NVIDIA GeForce RTX 5060 Ti** (`sm_120`)
-- Post-build tests: `_test_a2.py` (8/8 accuracy OK), `_test_triton.py` (JIT OK) — see `md/2.9.0_COMPLETE_TEST_AND_VALIDATION_GUIDE.md` §10
+- Post-build tests: `tests/test_a2_smoke.py` (8/8 accuracy OK), `tests/test_triton_smoke.py` (JIT OK) — see `md/2.9.0_COMPLETE_TEST_AND_VALIDATION_GUIDE.md` §10
 
 **Git commits that implement the arch-policy fixes:**
 
@@ -344,8 +344,8 @@ Example fragment (order may vary):
 |-------|--------|
 | Wheel exists | `flash_attn-2.9.0+cu132torch2.12.0cxx11abiTRUE-cp313-cp313-win_amd64.whl` (~355 MiB) |
 | `import flash_attn` | OK in `D:\USERFILES\fp8e4m3\venv` |
-| `_test_a2.py` | 8/8 accuracy cases OK; backward finite |
-| `_test_triton.py` | Triton JIT OK; backward finite |
+| `tests/test_a2_smoke.py` | 8/8 accuracy cases OK; backward finite |
+| `tests/test_triton_smoke.py` | Triton JIT OK; backward finite |
 | Runtime CUDA | Matches wheel tag **cu132** / torch **2.12.0+cu132** |
 
 Functional kernel behavior (A-1, A-2, split-KV) is documented in `md/FA2_CHANGES_v1.2.md` and `md/2.9.0_COMPLETE_TEST_AND_VALIDATION_GUIDE.md`; this document covers **only the toolkit / MSVC / gencode port**.
@@ -361,7 +361,7 @@ Functional kernel behavior (A-1, A-2, split-KV) is documented in `md/FA2_CHANGES
    - `python setup.py build_ext --inplace` (dev), or
    - `WindowsWhlBuilder_cuda.bat` (wheel; sets `DISTUTILS_USE_SDK=1`).
 5. Confirm ninja log has **no** `C1189` preprocessor error and **no** `compute_110f.cpp1.ii` fatal.
-6. Run `_test_a2.py` and `_test_triton.py` on your GPU arch (`sm_120` needs `120` in the arch list).
+6. Run `tests/test_a2_smoke.py` and `tests/test_triton_smoke.py` on your GPU arch (`sm_120` needs `120` in the arch list).
 
 ---
 

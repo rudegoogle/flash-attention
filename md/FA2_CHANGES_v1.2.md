@@ -1,6 +1,6 @@
-# FA2 Kernel Changes in v1.1
+# FA2 Kernel Changes in v1.2
 
-This document explains every code change applied to the FA2 (CUDA) path in this fork. The upstream repository has shifted focus to FA3 (Hopper) and FA4 (CuTeDSL); this fork continues FA2 development for sm_80+ on Windows with PyTorch 2.10+ / CUDA 13+.
+This document explains every code change applied to the FA2 (CUDA) path in this fork for **fork release v1.2** (Python package `flash_attn` **2.9.0**). The upstream repository has shifted focus to FA3 (Hopper) and FA4 (CuTeDSL); this fork continues FA2 development for sm_80+ on Windows with PyTorch 2.10+ / 2.12+ and CUDA 13+.
 
 ## Files modified
 
@@ -54,12 +54,12 @@ row_sum(mi) *= scores_scale;
 ## 2. A-2 — Packed FMA via `fma.rn.f32x2` (`scale_apply_exp2`)
 
 ### What it does
-On `sm_100` and newer (Blackwell), the compiler can emit a single `fma.rn.f32x2` instruction that computes two FMAs in parallel. On older architectures the helper falls back to two plain `fmaf` calls.
+On `sm_100` and newer (Blackwell), the kernel uses inline PTX `fma.rn.f32x2` to compute two pre-`exp2f` FMA terms in one instruction. On older architectures the helper falls back to two plain `fmaf` calls. `exp2f` remains scalar (no `f32x2` MUFU form).
 
 ### New helper — `fma_f32x2`
 
 ```cpp
-// Packed FMA helper: computes (d0,d1) = (a0*b0+c0, a1*b1+c1).
+// Packed FMA helper (Plan A-2): computes (d0,d1) = (a0*b0+c0, a1*b1+c1).
 // On sm_100+ (Blackwell), emits a single fma.rn.f32x2 instruction.
 // Falls back to two plain FMAs on older arches and when UNFUSE_FMA is set.
 __forceinline__ __device__ void fma_f32x2(
@@ -67,8 +67,9 @@ __forceinline__ __device__ void fma_f32x2(
     float a0, float a1,
     float b0, float b1,
     float c0, float c1) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 1000 && !defined(UNFUSE_FMA)
-    asm("{\n\t"
+#if __CUDA_ARCH__ >= 1000 && !defined(UNFUSE_FMA)
+    asm volatile(
+        "{\n\t"
         ".reg .b64 ra, rb, rc, rd;\n\t"
         "mov.b64 ra, {%2, %3};\n\t"
         "mov.b64 rb, {%4, %5};\n\t"
@@ -85,31 +86,31 @@ __forceinline__ __device__ void fma_f32x2(
 }
 ```
 
-### Changed code — `scale_apply_exp2`
+### Changed code — `scale_apply_exp2` (sm_100+ path)
 
 ```cpp
-// Added near the top of scale_apply_exp2:
-constexpr int N1 = decltype(size<1>(tensor))::value;
-
-// Inside the mi loop, after computing max_scaled and neg_max_scaled:
-const float neg_max_scaled = -max_scaled;
-#pragma unroll
-for (int ni = 0; ni + 1 < N1; ni += 2) {
-    float t0, t1;
-    FLASH_NAMESPACE::fma_f32x2(t0, t1,
-        tensor(mi, ni), tensor(mi, ni + 1),
-        scale, scale,
-        neg_max_scaled, neg_max_scaled);
-    tensor(mi, ni)     = exp2f(t0);
-    tensor(mi, ni + 1) = exp2f(t1);
-}
-if constexpr (N1 % 2 != 0) {
-    constexpr int ni = N1 - 1;
-    tensor(mi, ni) = exp2f(tensor(mi, ni) * scale - max_scaled);
-}
+const float max_scaled = max(mi) == -INFINITY ? 0.f : max(mi) * (Scale_max ? scale : float(M_LOG2E));
+#if __CUDA_ARCH__ >= 1000 && !defined(UNFUSE_FMA)
+    const float neg_max_scaled = -max_scaled;
+    constexpr int N1 = decltype(size<1>(tensor))::value;
+    #pragma unroll
+    for (int ni = 0; ni < N1 - 1; ni += 2) {
+        float t0 = tensor(mi, ni);
+        float t1 = tensor(mi, ni + 1);
+        float r0, r1;
+        fma_f32x2(r0, r1, t0, t1, scale, scale, neg_max_scaled, neg_max_scaled);
+        tensor(mi, ni)     = exp2f(r0);
+        tensor(mi, ni + 1) = exp2f(r1);
+    }
+    if constexpr (N1 % 2 != 0) {
+        constexpr int last = N1 - 1;
+        tensor(mi, last) = exp2f(tensor(mi, last) * scale - max_scaled);
+    }
+#else
+    // Original single-element loop for sm_80 / sm_90 and when UNFUSE_FMA is set.
+    ...
+#endif
 ```
-
-The old single-element loop is preserved under the `#else` branch for `sm_80`/`sm_90` and when `UNFUSE_FMA` is defined.
 
 ---
 
@@ -143,13 +144,13 @@ softmax.template softmax_rescale_o</*Is_first=*/false, /*Check_inf=*/Is_causal |
 +__version__ = "2.9.0"
 ```
 
-This marks the fork feature line. The upstream package may continue its own numbering; this fork’s `2.9.0` only indicates that A-1 and A-2 are present in this tree.
+This marks the fork feature line for **v1.2**. The upstream package may continue its own numbering; this fork’s `2.9.0` only indicates that A-1 and A-2 are present in this tree.
 
 ---
 
 ## Build / compatibility notes
 
-- **PyTorch:** `>=2.10` required (ABI header `<torch/extension.h>`).
-- **CUDA:** `>=13.0` for native compilation; produced SASS covers `sm_80;90;100;110;120`.
-- **Windows:** Supported. FA4 (CuTeDSL) remains unavailable on Windows due to missing `win_amd64` native libraries.
+- **PyTorch:** `>=2.10` required (`install_requires`); wheels and local builds are commonly tested with **2.12+cu132**.
+- **CUDA:** Toolkit **>=13.0** for native compilation; **13.2** is used for cu132 PyTorch builds. Produced SASS covers `sm_80;90;100;110;120`.
+- **Windows:** Supported. FA4 (CuTeDSL) remains unavailable on Windows due to missing `win_amd64` native libraries. MSVC host compiles invoked by `nvcc` need `/Zc:preprocessor` (see `setup.py` when `DISTUTILS_USE_SDK=1`).
 - **Fallback:** Both A-1 and A-2 are guarded by template flags / `__CUDA_ARCH__` so the same binary runs on Ampere, Hopper, and Blackwell.

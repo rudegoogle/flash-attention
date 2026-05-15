@@ -23,7 +23,9 @@ jobs:
       - name: Ruff format
         run: ruff format --check flash_attn/cute/ --exclude "flash_attn/cute/flash_bwd.py,flash_attn/cute/flash_fwd.py,flash_attn/cute/flash_fwd_sm100.py,flash_attn/cute/interface.py"
 
+  # Upstream FA4 GPU tests require a self-hosted B200 runner (not available on this fork).
   fa4-correctness-and-benchmark:
+    if: false
     strategy:
       fail-fast: false
       matrix:

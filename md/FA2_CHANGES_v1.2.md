@@ -174,6 +174,22 @@ This marks the fork feature line for **v1.2**. The upstream package may continue
 ## Build / compatibility notes
 
 - **PyTorch:** **`>=2.10` required** — enforced in `setup.py` `install_requires` as `torch>=2.10` on the CUDA wheel path. Extension code uses `<torch/extension.h>` (PyTorch 2.10+ layout). Wheels and local builds are commonly tested with **2.12+cu132**; the validation guide also documents runs on **2.11.0+cu130**.
-- **CUDA:** Toolkit **>=13.0** for native compilation; **13.2** is used for cu132 PyTorch builds. Default `FLASH_ATTN_CUDA_ARCHS` in `setup.py`: `80;90;100;120` (Ampere, Hopper, Blackwell datacenter/consumer — **no sm_110 / Thor** in the fork default).
+- **CUDA:** Toolkit **>=13.0** for native compilation; **13.2** is used for cu132 PyTorch builds.
 - **Windows:** Supported. FA4 (CuTeDSL) remains unavailable on Windows due to missing `win_amd64` native libraries. MSVC host compiles invoked by `nvcc` need `/Zc:preprocessor` (see `setup.py` when `DISTUTILS_USE_SDK=1`).
-- **Fallback:** A-1 is gated by the `Use_rescale_threshold` template flag at each call site. A-2 is gated by `#if __CUDA_ARCH__ >= 1000` inside `scale_apply_exp2` / `fma_f32x2`, so one binary runs on Ampere, Hopper, and Blackwell.
+- **Fallback:** A-1 is gated by the `Use_rescale_threshold` template flag at each call site. A-2 is gated by `#if __CUDA_ARCH__ >= 1000` inside `scale_apply_exp2` / `fma_f32x2`, so one binary runs on Ampere, Hopper, and Blackwell (`sm_100` / `sm_120` family), not Thor (`sm_101` / `sm_110`).
+
+### CUDA arch policy (must match `setup.py`)
+
+| Token in `FLASH_ATTN_CUDA_ARCHS` | SASS emitted (`add_cuda_gencodes`) | Notes |
+|---|---|---|
+| `80` | `sm_80` | Ampere |
+| `90` | `sm_90` | Hopper (CUDA toolkit >= 11.8) |
+| `100` | `sm_100` or `sm_100` via `100f` on CUDA >= 12.9 | Blackwell datacenter |
+| `120` | `sm_120` or `sm_120` via `120f` on CUDA >= 12.9 | e.g. RTX 50-series (`sm_120`) |
+| `101`, `110` | **not built** | Thor — stripped with a warning if present in the env var |
+| other tokens | **not built** | stripped with a warning |
+
+- **Default:** `FLASH_ATTN_CUDA_ARCHS="80;90;100;120"` in `cuda_archs()` when the env var is unset.
+- **Optional override:** `WindowsWhlBuilder_cuda.bat … CUDA_ARCH 80;90;100;120` sets the same env var for the build.
+- **PTX:** newest numeric arch among the supported set also gets `code=compute_*` for forward-compatible JIT (same as pre-fork multi-arch wheels).
+- **A-2 scope:** `__CUDA_ARCH__ >= 1000` in `softmax.h` covers the Blackwell **datacenter/consumer** path above; it does **not** add a separate Thor-only kernel variant.

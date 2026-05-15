@@ -681,7 +681,7 @@ if ROCM_BACKEND == "triton":
     ]
 else:
     install_requires = [
-        "torch",
+        "torch>=2.10",
         "einops",
     ]
 

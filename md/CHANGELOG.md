@@ -2,6 +2,12 @@
 
 Fork-only release history for `ussoewwin/flash-attention`. **Independent** of the upstream Dao-AILab changelog and tags. Upstream changes: [Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention).
 
+## v1.2 — 2026-05-15
+
+- **Summary:** Fork **v2.9.0** — FA2 backports **A-1** (rescale threshold skip) and **A-2** (packed `fma.rn.f32x2` in `scale_apply_exp2` on sm_100+). Kernel notes: [md/FA2_CHANGES_v1.2.md](FA2_CHANGES_v1.2.md). Validation: [md/2.9.0_COMPLETE_TEST_AND_VALIDATION_GUIDE.md](2.9.0_COMPLETE_TEST_AND_VALIDATION_GUIDE.md).
+- **CUDA `install_requires`:** `torch>=2.10` (matches build ABI in `csrc/flash_attn/flash_api.cpp`).
+- **Release (GitHub):** https://github.com/ussoewwin/flash-attention/releases/tag/v1.2
+
 ## v1.1 — 2026-05-13
 
 - **Summary:** Fork **v2.8.4** vs **v2.8.3** — upstream v2.9.0-equivalent merge + fork-only fixes (split-KV `num_splits==1` branch removed for `sm_80` ptxas stability; CUTLASS bump). Details: `md/v2.8.4_WHAT_CHANGED.md`.

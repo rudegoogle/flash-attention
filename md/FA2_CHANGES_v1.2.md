@@ -10,6 +10,8 @@ This document explains every code change applied to the FA2 (CUDA) path in this 
 | `csrc/flash_attn/src/flash_fwd_kernel.h` | Kernel dispatch: adds template flags to call sites |
 | `flash_attn/__init__.py` | Version marker for the fork feature line |
 
+**Scope (this document):** forward FA2 CUDA kernels only. Other v2.9.0 fork changes (Triton fix, split-KV launch countermeasure, build scripts) are documented in [2.9.0_COMPLETE_TEST_AND_VALIDATION_GUIDE.md](2.9.0_COMPLETE_TEST_AND_VALIDATION_GUIDE.md).
+
 ---
 
 ## 1. A-1 — Rescale threshold skip (`softmax_rescale_o`)
@@ -19,6 +21,9 @@ When a new block’s row-max is virtually identical to the running row-max, the 
 
 ### Why it is safe
 The threshold (`-0.01f`) corresponds to `scores_scale >= ~0.993`, i.e. a worst-case relative error below `0.7%`. The current block still uses the correct `row_max` for its own `scale_apply_exp2`; only the running `O`/`row_sum` rescale is approximated.
+
+### Forward-only
+`softmax_rescale_o` is used on the forward path only. Backward kernels (`flash_bwd_*.h`) do not call this helper; A-1 does not affect backward numerics or build.
 
 ### Changed code
 
@@ -54,13 +59,13 @@ row_sum(mi) *= scores_scale;
 ## 2. A-2 — Packed FMA via `fma.rn.f32x2` (`scale_apply_exp2`)
 
 ### What it does
-On `sm_100` and newer (Blackwell), the kernel uses inline PTX `fma.rn.f32x2` to compute two pre-`exp2f` FMA terms in one instruction. On older architectures the helper falls back to two plain `fmaf` calls. `exp2f` remains scalar (no `f32x2` MUFU form).
+On **`sm_100` and `sm_120`** (and any arch with `__CUDA_ARCH__ >= 1000`, i.e. Blackwell-class), the kernel uses inline PTX `fma.rn.f32x2` to compute two pre-`exp2f` FMA terms in one instruction. On older architectures (`sm_80`, `sm_90`, …) the helper falls back to two plain `fmaf` calls. `exp2f` remains scalar (no `f32x2` MUFU form).
 
 ### New helper — `fma_f32x2`
 
 ```cpp
 // Packed FMA helper (Plan A-2): computes (d0,d1) = (a0*b0+c0, a1*b1+c1).
-// On sm_100+ (Blackwell), emits a single fma.rn.f32x2 instruction.
+// On sm_100 / sm_120+ (__CUDA_ARCH__ >= 1000), emits a single fma.rn.f32x2 instruction.
 // Falls back to two plain FMAs on older arches and when UNFUSE_FMA is set.
 __forceinline__ __device__ void fma_f32x2(
     float &d0, float &d1,
@@ -116,14 +121,16 @@ const float max_scaled = max(mi) == -INFINITY ? 0.f : max(mi) * (Scale_max ? sca
 
 ## 3. Kernel dispatch changes (`flash_fwd_kernel.h`)
 
-Four call sites pass the new template argument `/*Use_rescale_threshold=*/true` to `softmax_rescale_o`:
+Four call sites pass `/*Use_rescale_threshold=*/true` to `softmax_rescale_o`. **All four are `Is_first=false` only** — the `masking_step == 0` branches keep `Is_first=true` and leave `Use_rescale_threshold` at its default `false`.
 
-1. `compute_attn_1rowblock`, non-first masking step (causal/local)
-2. `compute_attn_1rowblock`, local-only loop
-3. `compute_attn_1rowblock_splitkv`, non-first masking step (causal/local/even-MN)
-4. `compute_attn_1rowblock_splitkv`, local-only loop
+| # | Function | Line (approx.) | Loop | `Check_inf` when threshold enabled |
+|---|----------|----------------|------|-------------------------------------|
+| 1 | `compute_attn_1rowblock` | 344 | masking, `masking_step > 0` | `Is_causal \|\| Is_local` |
+| 2 | `compute_attn_1rowblock` | 407 | no masking on S | `Is_local` |
+| 3 | `compute_attn_1rowblock_splitkv` | 918 | masking, `masking_step > 0` | `Is_causal \|\| Is_local \|\| !Is_even_MN` |
+| 4 | `compute_attn_1rowblock_splitkv` | 985 | no masking on S | `Is_local` |
 
-Example (site 1):
+Example (site 1 — standard forward):
 
 ```cpp
 // Before:
@@ -132,6 +139,22 @@ softmax.template softmax_rescale_o</*Is_first=*/false, /*Check_inf=*/Is_causal |
 // After:
 softmax.template softmax_rescale_o</*Is_first=*/false, /*Check_inf=*/Is_causal || Is_local, /*Use_rescale_threshold=*/true>(...)
 ```
+
+Example (site 3 — split-KV masking branch; note extra `!Is_even_MN` on `Check_inf`):
+
+```cpp
+masking_step == 0
+    ? softmax.template softmax_rescale_o</*Is_first=*/true,  /*Check_inf=*/Is_causal || Is_local || !Is_even_MN>(...)
+    : softmax.template softmax_rescale_o</*Is_first=*/false, /*Check_inf=*/Is_causal || Is_local || !Is_even_MN, /*Use_rescale_threshold=*/true>(...);
+```
+
+---
+
+## Related documentation
+
+- **[2.9.0_COMPLETE_TEST_AND_VALIDATION_GUIDE.md](2.9.0_COMPLETE_TEST_AND_VALIDATION_GUIDE.md)** — end-to-end validation (A-1/A-2, Triton `flash_attn_triton.py` fix, split-KV launch countermeasure in `flash_fwd_launch_template.h`, wheel build, benchmark commands).
+- **[CHANGELOG.md](CHANGELOG.md)** — fork release history (v1.2 / package 2.9.0).
+- **[AI/FA2_BACKPORT_FROM_FA4_PLAN.md](../AI/FA2_BACKPORT_FROM_FA4_PLAN.md)** — backport plan and line references for the four call sites.
 
 ---
 
@@ -150,7 +173,7 @@ This marks the fork feature line for **v1.2**. The upstream package may continue
 
 ## Build / compatibility notes
 
-- **PyTorch:** `>=2.10` required (`install_requires`); wheels and local builds are commonly tested with **2.12+cu132**.
-- **CUDA:** Toolkit **>=13.0** for native compilation; **13.2** is used for cu132 PyTorch builds. Produced SASS covers `sm_80;90;100;110;120`.
+- **PyTorch:** **`>=2.10` required** — enforced in `setup.py` `install_requires` as `torch>=2.10` on the CUDA wheel path. Extension code uses `<torch/extension.h>` (PyTorch 2.10+ layout). Wheels and local builds are commonly tested with **2.12+cu132**; the validation guide also documents runs on **2.11.0+cu130**.
+- **CUDA:** Toolkit **>=13.0** for native compilation; **13.2** is used for cu132 PyTorch builds. Default `FLASH_ATTN_CUDA_ARCHS` in `setup.py`: `80;90;100;110;120` (Ampere through Blackwell).
 - **Windows:** Supported. FA4 (CuTeDSL) remains unavailable on Windows due to missing `win_amd64` native libraries. MSVC host compiles invoked by `nvcc` need `/Zc:preprocessor` (see `setup.py` when `DISTUTILS_USE_SDK=1`).
-- **Fallback:** Both A-1 and A-2 are guarded by template flags / `__CUDA_ARCH__` so the same binary runs on Ampere, Hopper, and Blackwell.
+- **Fallback:** A-1 is gated by the `Use_rescale_threshold` template flag at each call site. A-2 is gated by `#if __CUDA_ARCH__ >= 1000` inside `scale_apply_exp2` / `fma_f32x2`, so one binary runs on Ampere, Hopper, and Blackwell.

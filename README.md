@@ -10,3 +10,5 @@ Source fork of [Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-at
 ## Fork documentation
 
 - Changelog (fork-only; not the upstream project changelog): [md/CHANGELOG.md](md/CHANGELOG.md)
+- FA2 kernel changes (v1.2 / package 2.9.0): [md/FA2_CHANGES_v1.2.md](md/FA2_CHANGES_v1.2.md)
+- 2.9.0 test and validation guide: [md/2.9.0_COMPLETE_TEST_AND_VALIDATION_GUIDE.md](md/2.9.0_COMPLETE_TEST_AND_VALIDATION_GUIDE.md)

@@ -10,3 +10,7 @@ Source fork of [Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-at
 ## Changelog
 
 - Fork-only release history (not the upstream project changelog): [md/CHANGELOG.md](md/CHANGELOG.md)
+
+## Documentation
+
+- [Explanation of GitHub Actions Workflows Removal](md/FA4_WORKFLOW_REMOVAL_EXPLANATION.md)

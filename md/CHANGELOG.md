@@ -2,6 +2,11 @@
 
 Fork-only release history for `ussoewwin/flash-attention`. **Independent** of the upstream Dao-AILab changelog and tags. Upstream changes: [Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention).
 
+## v1.4 — 2026-05-23
+
+- **Summary:** Fork release **v1.4** / package **`flash_attn` 2.9.1** — patch release on the 2.9.0 feature line (Plan A-1 / A-2). **A-1:** file-scope `kSoftmaxRescaleSkipThreshold` and skip rescale in `softmax_rescale_o` when `scaled_diff > -0.01f`, with `static_assert(!(Is_first && Use_rescale_threshold))`. **A-2:** `scale_apply_exp2` uses packed `fma.rn.f32x2` on sm_100+ via `fma_f32x2` in `utils.h`, `static_assert(N1 % 2 == 0)`, optional `#pragma message` when `UNFUSE_FMA` is set. SASS gate check: `bench/check_sass_gates.py`. Same multi-arch wheel policy as v1.2 (**`80;90;100;120`**). GitHub Release tag and wheel: *to be published*.
+- **Release notes:** [FA2 2.9.0 → 2.9.1](FA2_2.9.0_to_2.9.1_RELEASE.md)
+
 ## v1.3 — 2026-05-15
 
 - **Summary:** Fork release **v1.3** — Windows FA2 **CUDA 13.2** build (PyTorch **2.12.0+cu132**, CUDA toolkit **13.2**, MSVC `/Zc:preprocessor`, default arch **`80;90;100;120`**, wheel tag **`cu132torch2.12.0`**). Smoke tests under `tests/`.

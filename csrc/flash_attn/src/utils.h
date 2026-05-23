@@ -410,4 +410,40 @@ __forceinline__ __device__ void calculate_dtanh(Tensor<Engine0, Layout0> &src_te
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
+// Packed FMA helper (Plan A-2): computes (d0,d1) = (a0*b0+c0, a1*b1+c1).
+// On sm_100+ (Blackwell), emits a single fma.rn.f32x2 instruction.
+// Falls back to two plain FMAs on older arches and when UNFUSE_FMA is set.
+__forceinline__ __device__ void fma_f32x2(
+    float &d0, float &d1,
+    float a0, float a1,
+    float b0, float b1,
+    float c0, float c1) {
+#if __CUDA_ARCH__ >= 1000 && !defined(UNFUSE_FMA)
+    asm volatile(
+        "{\n\t"
+        ".reg .b64 ra, rb, rc, rd;\n\t"
+        "mov.b64 ra, {%2, %3};\n\t"
+        "mov.b64 rb, {%4, %5};\n\t"
+        "mov.b64 rc, {%6, %7};\n\t"
+        "fma.rn.f32x2 rd, ra, rb, rc;\n\t"
+        "mov.b64 {%0, %1}, rd;\n\t"
+        "}\n"
+        : "=f"(d0), "=f"(d1)
+        : "f"(a0), "f"(a1), "f"(b0), "f"(b1), "f"(c0), "f"(c1));
+#else
+    d0 = fmaf(a0, b0, c0);
+    d1 = fmaf(a1, b1, c1);
+#endif
+}
+
+#if defined(UNFUSE_FMA) && defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 1000)
+    #pragma message("UNFUSE_FMA is defined while compiling for sm_100+; " \
+                    "the Blackwell-only fma.rn.f32x2 path in scale_apply_exp2 is disabled. " \
+                    "This is the documented ablation path (see AI/FA2_BACKPORT_FROM_FA4_PLAN.md " \
+                    "section 8.2 ablation row 'A-2 off' and section 10.2 rollback). " \
+                    "Remove UNFUSE_FMA to re-enable the packed FMA path.")
+#endif
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
 }  // namespace FLASH_NAMESPACE

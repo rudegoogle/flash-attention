@@ -74,13 +74,13 @@ if IS_ROCM:
 NVCC_THREADS = os.getenv("NVCC_THREADS") or "4"
 
 # FA2 fork wheel build: SASS for Ampere/Hopper/Blackwell only (see md/FA2_CHANGES_v1.2.md).
-FORK_SUPPORTED_CUDA_ARCHS = ("80", "90", "100", "120")
+FORK_SUPPORTED_CUDA_ARCHS = ("80", "89", "90", "100", "120", "121")
 FORK_THOR_CUDA_ARCHS = frozenset({"101", "110"})
 
 
 @functools.lru_cache(maxsize=None)
 def cuda_archs() -> list[str]:
-    raw = os.getenv("FLASH_ATTN_CUDA_ARCHS", "80;90;100;120")
+    raw = os.getenv("FLASH_ATTN_CUDA_ARCHS", "80;89;90;100;120;121")
     requested = [a.strip() for a in raw.split(";") if a.strip()]
     dropped_thor = [a for a in requested if a in FORK_THOR_CUDA_ARCHS]
     if dropped_thor:
@@ -141,9 +141,11 @@ def add_cuda_gencodes(cc_flag, archs, bare_metal_version):
 
     Requested arch tokens (after cuda_archs() filtering) map to nvcc targets as:
       - 80  -> compute_80, sm_80
+      - 89  -> compute_89, sm_89  (CUDA >= 11.8)
       - 90  -> compute_90, sm_90  (CUDA >= 11.8)
       - 100 -> compute_100f, sm_100 on CUDA >= 12.9 else compute_100, sm_100 (CUDA >= 12.8)
       - 120 -> compute_120f, sm_120 on CUDA >= 12.9 else compute_120, sm_120 (CUDA >= 12.8)
+      - 121 -> compute_120f, sm_121 on CUDA >= 12.9 else compute_120, sm_121 (CUDA >= 12.8)
 
     Thor / sm_101 / sm_110 are not built (see FORK_THOR_CUDA_ARCHS in cuda_archs()).
     PTX for the newest numeric arch is embedded for forward-compatible JIT.
@@ -151,6 +153,10 @@ def add_cuda_gencodes(cc_flag, archs, bare_metal_version):
     # Always-regular 80
     if "80" in archs:
         cc_flag += ["-gencode", "arch=compute_80,code=sm_80"]
+
+    # Ada Lovelace 8.9 needs >= 11.8
+    if bare_metal_version >= Version("11.8") and "89" in archs:
+        cc_flag += ["-gencode", "arch=compute_89,code=sm_89"]
 
     # Hopper 9.0 needs >= 11.8
     if bare_metal_version >= Version("11.8") and "90" in archs:
@@ -171,6 +177,13 @@ def add_cuda_gencodes(cc_flag, archs, bare_metal_version):
                 cc_flag += ["-gencode", "arch=compute_120f,code=sm_120"]
             else:
                 cc_flag += ["-gencode", "arch=compute_120,code=sm_120"]
+
+        if "121" in archs:
+            # sm_121 is supported via compute_120(f)
+            if bare_metal_version >= Version("12.9"):
+                cc_flag += ["-gencode", "arch=compute_120f,code=sm_121"]
+            else:
+                cc_flag += ["-gencode", "arch=compute_120,code=sm_121"]
 
     # PTX for newest requested arch (forward-compat)
     numeric = [a for a in archs if a.isdigit()]

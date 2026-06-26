@@ -30,6 +30,7 @@ from flash_attn.cute.mask import (
 from flash_attn.cute.tile_scheduler import SM100_TMEM_CAPACITY_COLUMNS
 from flash_attn.cute.flash_fwd_sm100 import DescaleTensors, _TUNING_CONFIG
 from flash_attn.cute.utils import ex2_emulation_2
+from flash_attn.cute.utils import AuxData
 
 
 class BlackwellFusedMultiHeadAttentionForward:
@@ -42,7 +43,7 @@ class BlackwellFusedMultiHeadAttentionForward:
         is_local: bool = False,
         is_split_kv: bool = False,
         pack_gqa: bool = False,
-        q_subtile_factor: int | None = None,
+        q_subtile_factor: int = 1,
         m_block_size: int = 128,
         n_block_size: int = 128,
         q_stage: int = 2,
@@ -67,7 +68,7 @@ class BlackwellFusedMultiHeadAttentionForward:
         )
         assert not pack_gqa, "SM100 forward with head_dim=256 does not support pack_gqa"
         assert not is_split_kv, "SM100 forward with head_dim=256 does not support SplitKV"
-        assert q_subtile_factor is None, (
+        assert q_subtile_factor == 1, (
             "SM100 forward with head_dim=256 does not support q_subtile_factor"
         )
         assert m_block_size == 128 and n_block_size == 128, (
@@ -179,7 +180,7 @@ class BlackwellFusedMultiHeadAttentionForward:
         learnable_sink: Optional[cute.Tensor] = None,
         descale_tensors: Optional[DescaleTensors] = None,
         blocksparse_tensors: Optional[cute.Tensor] = None,
-        aux_tensors: Optional[list] = None,
+        aux_data: AuxData = AuxData(),
         stream: cuda.CUstream = None,
     ):
         # Keep parity with FlashAttentionForwardSm100.__call__ interface.
@@ -193,7 +194,12 @@ class BlackwellFusedMultiHeadAttentionForward:
         assert blocksparse_tensors is None, (
             "SM100 forward with head_dim=256 does not support block sparsity"
         )
-        assert aux_tensors is None, "SM100 forward with head_dim=256 does not support aux_tensors"
+        assert aux_data.tensors is None, (
+            "SM100 forward with head_dim=256 does not support aux_tensors"
+        )
+        assert aux_data.scalars is None, (
+            "SM100 forward with head_dim=256 does not support aux_scalars"
+        )
         assert not self.is_local, (
             "SM100 forward with head_dim=256 does not support local attention yet"
         )
@@ -504,7 +510,7 @@ class BlackwellFusedMultiHeadAttentionForward:
                 Int64, self.mma_corr_stage * 2
             ]  # mma_corr_{producer,consumer}
             # A CTA-wide "TMEM lifetime" barrier used to safely deallocate TMEM after all users finish.
-            tmem_dealloc_mbar_ptr: Int64
+            tmem_dealloc_mbar: Int64
             # Tmem holding buffer
             tmem_holding_buf: Int32
             # CLC pipeline barriers and response buffer
@@ -670,11 +676,11 @@ class BlackwellFusedMultiHeadAttentionForward:
         ).make_participants()
         # Tensor memory dealloc barrier init
         tmem = utils.TmemAllocator(
-            storage.tmem_holding_buf,
+            storage.tmem_holding_buf.ptr,
             barrier_for_retrieve=self.tmem_alloc_barrier,
             allocator_warp_id=self.correction_warp_ids[0],
             is_two_cta=True,
-            two_cta_tmem_dealloc_mbar_ptr=storage.tmem_dealloc_mbar_ptr,
+            two_cta_tmem_dealloc_mbar_ptr=storage.tmem_dealloc_mbar.ptr,
         )
         tmem.allocate(self.tmem_alloc_cols)
         tmem.wait_for_alloc()

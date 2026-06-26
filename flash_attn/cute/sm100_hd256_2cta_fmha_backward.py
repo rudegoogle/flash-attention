@@ -22,6 +22,7 @@ from flash_attn.cute.sm100_hd256_2cta_fmha_backward_dkdvkernel import (
     BlackwellFusedMultiHeadAttentionBackwardDKDVKernel,
 )
 from flash_attn.cute.cute_dsl_utils import assume_tensor_aligned
+from flash_attn.cute.utils import AuxData
 
 
 def _as_bshkrd_tensor(
@@ -115,7 +116,7 @@ class BlackwellFusedMultiHeadAttentionBackward:
         score_mod_bwd: cutlass.Constexpr | None = None,
         mask_mod: cutlass.Constexpr | None = None,
         has_aux_tensors: cutlass.Constexpr = False,
-        subtile_factor: cutlass.Constexpr[int] = 1,
+        q_subtile_factor: cutlass.Constexpr[int] = 1,
         tile_m_dq: int = 128,
         tile_n_dq: int = 128,
         tile_m_dkdv: int = 128,
@@ -147,7 +148,7 @@ class BlackwellFusedMultiHeadAttentionBackward:
             "SM100 backward with head_dim=256 only supports cluster_size in {1, 2}"
         )
         assert use_2cta_instrs, "SM100 backward with head_dim=256 requires use_2cta_instrs=True"
-        # subtile_factor is accepted for interface parity with FlashAttentionBackwardSm100,
+        # q_subtile_factor is accepted for interface parity with FlashAttentionBackwardSm100,
         # but this dedicated kernel uses fixed internal behavior.
 
         self.acc_dtype = cutlass.Float32
@@ -205,7 +206,7 @@ class BlackwellFusedMultiHeadAttentionBackward:
         dQ_semaphore: cute.Tensor | None = None,
         dK_semaphore: cute.Tensor | None = None,
         dV_semaphore: cute.Tensor | None = None,
-        aux_tensors: tuple[cute.Tensor] | None = None,
+        aux_data: AuxData = AuxData(),
         block_sparse_tensors: cute.Tensor | None = None,
         stream: cuda.CUstream = None,
     ):
@@ -222,8 +223,11 @@ class BlackwellFusedMultiHeadAttentionBackward:
         assert block_sparse_tensors is None, (
             "SM100 backward with head_dim=256 does not support block sparse tensors"
         )
-        assert aux_tensors is None or len(aux_tensors) == 0, (
+        assert aux_data.tensors is None or len(aux_data.tensors) == 0, (
             "SM100 backward with head_dim=256 does not support aux_tensors"
+        )
+        assert aux_data.scalars is None or len(aux_data.scalars) == 0, (
+            "SM100 backward with head_dim=256 does not support aux_scalars"
         )
         assert dQ_accum is not None, (
             "SM100 backward with head_dim=256 expects dQ tensor at dQ_accum slot"

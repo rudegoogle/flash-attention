@@ -50,7 +50,7 @@ jobs:
 
       - name: Run Build Script
         shell: cmd
-        run: build_windows.bat FORCE_CXX11_ABI %CXX11_ABI% CUDA_ARCH %CUDA_ARCH%
+        run: WindowsWhlBuilder_cuda.bat FORCE_CXX11_ABI %CXX11_ABI% CUDA_ARCH %CUDA_ARCH%
 
       - name: Upload Wheel Artifacts
         uses: actions/upload-artifact@v4

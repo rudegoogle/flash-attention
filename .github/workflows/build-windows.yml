@@ -19,7 +19,7 @@ jobs:
     steps:
       - name: Enable Git long paths
         run: git config --system core.longpaths true
-    
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -31,19 +31,43 @@ jobs:
           python-version: '3.13'
 
       - name: Install CUDA Toolkit 13.2
-        uses: Jimver/cuda-toolkit@v0.2.21
-        with:
-          cuda: '13.2.0'
-          method: 'network'
-          # GitHub Actions runners typically have ~4 cores. FlashAttention compilation
-          # is memory intensive, but 4 is usually safe on CI. Your bat file enforces MAX_JOBS=4.
+        uses: Jimver/cuda-toolkit@v0.2.35
         id: cuda-toolkit
+        with:
+          cuda: '13.2' # Changed from 13.2.0 to 13.2
+          method: 'network'
+        continue-on-error: true # Continue if the action can't find the network package
+
+      - name: Fallback to pre-installed CUDA (if network install fails)
+        if: steps.cuda-toolkit.outcome == 'failure'
+        shell: pwsh
+        run: |
+          Write-Host "Network install failed. Attempting to use pre-installed CUDA..."
+          $cudaPath = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2"
+          if (Test-Path $cudaPath) {
+            echo "$cudaPath\bin" >> $env:GITHUB_PATH
+            echo "CUDA_PATH=$cudaPath" >> $env:GITHUB_ENV
+            Write-Host "Found pre-installed CUDA at $cudaPath"
+          } else {
+            # Search for any v13.* if exact match isn't there yet
+            $cudaPath = Get-ChildItem "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\" -Directory | Where-Object { $_.Name -match "v13" } | Select-Object -First 1 -ExpandProperty FullName
+            if ($cudaPath) {
+              echo "$cudaPath\bin" >> $env:GITHUB_PATH
+              echo "CUDA_PATH=$cudaPath" >> $env:GITHUB_ENV
+              Write-Host "Found fallback pre-installed CUDA at $cudaPath"
+            } else {
+              Write-Error "No CUDA 13.x toolkit found on the runner!"
+              exit 1
+            }
+          }
+
+      - name: Verify NVCC
+        shell: cmd
+        run: nvcc --version
 
       - name: Install PyTorch (cu132)
         run: |
           python -m pip install --upgrade pip
-          # By June 2026, PyTorch stable should fully support Python 3.13 and CUDA 13.2
-          # Using the cu132 index URL. Adjust if PyTorch uses a different naming convention.
           pip install torch --index-url https://download.pytorch.org/whl/cu132
 
       - name: Setup MSVC Developer Command Prompt

@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.5 — 2026-07-10
+
+- **Summary:** Fork release **v1.5** — Windows build fixes for PyTorch **2.13.0+cu13.2** under MSVC. Resolved the MSVC compiler overload resolution ambiguity (C2666) by introducing exact-match `operator==` and `operator!=` for `c10::ArrayRef<T>` template in namespace `c10`. Upgraded default C++ standard flags to C++20 (`-std=c++20` / `/std:c++20`) in `setup.py` to support C++20 modern syntax features (such as designated initializers and bitfield member initializers) used in PyTorch 2.13.0's headers.
+- **Release notes:** [MSVC Compilation Fixes for PyTorch 2.13.0](msvc_build_fix_report.md)
+
 ## v1.4 — 2026-05-23
 
 - **Summary:** Fork release **v1.4** / package **`flash_attn` 2.9.1** — patch release on the 2.9.0 feature line (Plan A-1 / A-2). **A-1:** file-scope `kSoftmaxRescaleSkipThreshold` and skip rescale in `softmax_rescale_o` when `scaled_diff > -0.01f`, with `static_assert(!(Is_first && Use_rescale_threshold))`. **A-2:** `scale_apply_exp2` uses packed `fma.rn.f32x2` on sm_100+ via `fma_f32x2` in `utils.h`, `static_assert(N1 % 2 == 0)`, optional `#pragma message` when `UNFUSE_FMA` is set. SASS gate check: `bench/check_sass_gates.py`. Same multi-arch wheel policy as v1.2 (**`80;90;100;120`**). GitHub Release tag and wheel: *to be published*.

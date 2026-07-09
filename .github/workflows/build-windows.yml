@@ -17,6 +17,9 @@ jobs:
       CXX11_ABI: "FALSE"
 
     steps:
+      - name: Enable Git long paths
+        run: git config --system core.longpaths true
+    
       - name: Checkout repository
         uses: actions/checkout@v4
         with:

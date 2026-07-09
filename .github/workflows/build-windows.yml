@@ -12,7 +12,6 @@ jobs:
     runs-on: windows-latest
     
     env:
-      # Set the target architectures and ABI flag to pass into your bat file
       CUDA_ARCH: "80;90;100;120"
       CXX11_ABI: "FALSE"
 
@@ -34,31 +33,40 @@ jobs:
         uses: Jimver/cuda-toolkit@v0.2.35
         id: cuda-toolkit
         with:
-          cuda: '13.2' # Changed from 13.2.0 to 13.2
+          cuda: '13.2.0' # Reverted to 13.2.0 to satisfy strict semver parsing
           method: 'network'
-        continue-on-error: true # Continue if the action can't find the network package
+        continue-on-error: true 
 
       - name: Fallback to pre-installed CUDA (if network install fails)
         if: steps.cuda-toolkit.outcome == 'failure'
         shell: pwsh
         run: |
-          Write-Host "Network install failed. Attempting to use pre-installed CUDA..."
-          $cudaPath = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2"
-          if (Test-Path $cudaPath) {
-            echo "$cudaPath\bin" >> $env:GITHUB_PATH
-            echo "CUDA_PATH=$cudaPath" >> $env:GITHUB_ENV
-            Write-Host "Found pre-installed CUDA at $cudaPath"
-          } else {
-            # Search for any v13.* if exact match isn't there yet
-            $cudaPath = Get-ChildItem "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\" -Directory | Where-Object { $_.Name -match "v13" } | Select-Object -First 1 -ExpandProperty FullName
-            if ($cudaPath) {
-              echo "$cudaPath\bin" >> $env:GITHUB_PATH
-              echo "CUDA_PATH=$cudaPath" >> $env:GITHUB_ENV
-              Write-Host "Found fallback pre-installed CUDA at $cudaPath"
-            } else {
-              Write-Error "No CUDA 13.x toolkit found on the runner!"
-              exit 1
+          Write-Host "Network install failed. Searching for pre-installed CUDA..."
+          $cudaBase = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"
+          $cudaPath = $null
+          
+          # 1. Check if the standard CUDA directory exists
+          if (Test-Path $cudaBase) {
+            # Search for any v13.* folder
+            $cudaPath = Get-ChildItem $cudaBase -Directory | Where-Object { $_.Name -match "v13" } | Select-Object -First 1 -ExpandProperty FullName
+          }
+          
+          # 2. If not found, check if nvcc is already in the system PATH
+          if (-not $cudaPath) {
+            $nvccCmd = Get-Command nvcc -ErrorAction SilentlyContinue
+            if ($nvccCmd) {
+              $cudaPath = Split-Path (Split-Path $nvccCmd.Source)
             }
+          }
+          
+          # 3. Apply the found path or fail gracefully
+          if ($cudaPath) {
+            echo "CUDA_PATH=$cudaPath" >> $env:GITHUB_ENV
+            echo "$cudaPath\bin" >> $env:GITHUB_PATH
+            Write-Host "Successfully set CUDA_PATH to $cudaPath"
+          } else {
+            Write-Error "No CUDA 13.x toolkit found on the runner or via network!"
+            exit 1
           }
 
       - name: Verify NVCC
@@ -84,4 +92,4 @@ jobs:
         with:
           name: flash-attn-windows-py313-cu132
           path: dist/*.whl
-          if-no-files-found: error # Fails the job if the wheel isn't generated
+          if-no-files-found: error

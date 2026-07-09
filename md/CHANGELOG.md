@@ -3,7 +3,7 @@
 ## v1.5 — 2026-07-10
 
 - **Summary:** Fork release **v1.5** — Windows build fixes for PyTorch **2.13.0+cu13.2** under MSVC. Resolved the MSVC compiler overload resolution ambiguity (C2666) by introducing exact-match `operator==` and `operator!=` for `c10::ArrayRef<T>` template in namespace `c10`. Upgraded default C++ standard flags to C++20 (`-std=c++20` / `/std:c++20`) in `setup.py` to support C++20 modern syntax features (such as designated initializers and bitfield member initializers) used in PyTorch 2.13.0's headers.
-- **Release notes:** [MSVC Compilation Fixes for PyTorch 2.13.0](msvc_build_fix_report.md)
+- **Release notes:** [MSVC Compilation Fixes for PyTorch 2.13.0](v1.5_RELEASE.md)
 
 ## v1.4 — 2026-05-23
 

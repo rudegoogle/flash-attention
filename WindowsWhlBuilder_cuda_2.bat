@@ -65,7 +65,7 @@ rem (setup.py get_wheel_url uses cu{major} for 13+; this rename uses full cuda r
 rem such as cu124torch2.11.0cxx11abiFALSE or cu130torch2.11.0cxx11abiFALSE
 for /f "delims=" %%i in ('python -c "import sys; from packaging.version import parse; import torch; python_version = f'cp{sys.version_info.major}{sys.version_info.minor}'; cxx11_abi=str(torch._C._GLIBCXX_USE_CXX11_ABI).upper(); torch_cuda_version = parse(torch.version.cuda); cuda_version = \"\".join(map(str, torch_cuda_version.release)); torch_version_raw = parse(torch.__version__); torch_version = \".\".join(map(str, torch_version_raw.release)); wheel_filename = f'cu{cuda_version}torch{torch_version}cxx11abi{cxx11_abi}'; print(wheel_filename);"') do set wheel_filename=%%i
 
-set tmpname=%wheel_filename%-blackwell
+set tmpname=%wheel_filename%.blackwell
 
 
 for %%i in (%dist_dir%\*.whl) do (

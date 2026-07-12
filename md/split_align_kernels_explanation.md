@@ -1,80 +1,80 @@
-# FlashAttention v2.9.2: split_align アーキテクチャ技術仕様書 (完成版)
+# FlashAttention v2.9.2: split_align Architecture Technical Specification (English & Numbered Edition)
 
-## 1. 概要 (Overview)
+## 1. Overview
 
-FlashAttention v2.9.2 にて導入された `split_align` アーキテクチャ変更は、**NVIDIAコンパイラ(ptxas)の直列コンパイルによる深刻なビルド遅延とクラッシュ**を解決するための構造的ハックである。
+The `split_align` architecture changes introduced in FlashAttention v2.9.2 serve as a structural workaround to resolve **severe compilation delays and memory crashes caused by the NVIDIA compiler (ptxas) serializing massive AST compilations**.
 
-シーケンス分割なし (`num_splits == 1`) という特殊条件下では、アラインメントに最適化された専用のブロック幅（`kBlockN_standard`）が必要となる。これを従来のディスパッチファイル内で実体化しようとすると、1ファイル内に巨大なASTが複数生成され、コンパイラがパンクする。この問題を回避するため、本変更では `num_splits == 1` 専用のインスタンス化を**24個の極小の独立したファイル (`flash_fwd_split_align_*.cu`) に分割**し、ビルドシステムによるマルチスレッド並列コンパイルを可能にした。
+Under the specific condition where sequence splitting is disabled (`num_splits == 1`), a highly optimized block width (`kBlockN_standard`) is required for alignment. Attempting to instantiate this alongside the standard split path within a single dispatch file forces the compiler to generate multiple massive ASTs concurrently, leading to OOM crashes. To prevent this, the `num_splits == 1` instantiations were **extracted into 24 extremely small, independent translation units (`flash_fwd_split_align_*.cu`)**. This forces the build system to compile them in parallel across multiple threads.
 
-また、Windows (MSVC) 環境においては、これら分割された巨大なオブジェクトファイル群を一度にリンクすると **2GBのサイズ制限 (LNK1189)** に抵触して致命的エラーとなる。そのため、当プロジェクトでは対象アーキテクチャ(SM)を `bat2` (Blackwell系) と `bat3` (Ampere/Hopper系) の3対3に分割することで、この並列コンパイルの恩恵を維持したまま2GB制限を突破する構成を構築した。
+However, on Windows (MSVC) environments, linking these dozens of massive object files simultaneously triggers the absolute **2GB size limit (LNK1189)**. Therefore, this project implements a mandatory workaround by dividing the target SM architectures into two separate build configurations: `bat2` (Blackwell family, 3 targets) and `bat3` (Ampere/Hopper family, 3 targets). This perfectly halves the linker payload size, allowing Windows users to bypass the 2GB limit while retaining the performance benefits of the parallelized `split_align` compilation.
 
-## 2. 追加・修正されたファイル一覧
+## 2. List of Added and Modified Files
 
-本アーキテクチャ変更に関わる全50ファイルのリストを示す。
+Below is the enumerated list of all 50 files involved in this architecture change.
 
-### コアディスパッチおよび自動生成スクリプト (2ファイル)
-- `csrc\flash_attn\src\generate_kernels.py`
-- `csrc\flash_attn\src\flash_fwd_launch_template.h`
+### Core Dispatch & Generator Scripts
+1. `csrc\flash_attn\src\generate_kernels.py`
+2. `csrc\flash_attn\src\flash_fwd_launch_template.h`
 
-### 新規追加されたアラインメント最適化カーネル (24ファイル)
-- `csrc\flash_attn\src\flash_fwd_split_align_hdim128_bf16_causal_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_align_hdim128_bf16_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_align_hdim128_fp16_causal_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_align_hdim128_fp16_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_align_hdim192_bf16_causal_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_align_hdim192_bf16_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_align_hdim192_fp16_causal_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_align_hdim192_fp16_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_align_hdim256_bf16_causal_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_align_hdim256_bf16_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_align_hdim256_fp16_causal_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_align_hdim256_fp16_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_align_hdim32_bf16_causal_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_align_hdim32_bf16_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_align_hdim32_fp16_causal_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_align_hdim32_fp16_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_align_hdim64_bf16_causal_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_align_hdim64_bf16_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_align_hdim64_fp16_causal_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_align_hdim64_fp16_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_align_hdim96_bf16_causal_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_align_hdim96_bf16_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_align_hdim96_fp16_causal_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_align_hdim96_fp16_sm80.cu`
+### Newly Added Alignment-Optimized Kernels (24 files)
+3. `csrc\flash_attn\src\flash_fwd_split_align_hdim128_bf16_causal_sm80.cu`
+4. `csrc\flash_attn\src\flash_fwd_split_align_hdim128_bf16_sm80.cu`
+5. `csrc\flash_attn\src\flash_fwd_split_align_hdim128_fp16_causal_sm80.cu`
+6. `csrc\flash_attn\src\flash_fwd_split_align_hdim128_fp16_sm80.cu`
+7. `csrc\flash_attn\src\flash_fwd_split_align_hdim192_bf16_causal_sm80.cu`
+8. `csrc\flash_attn\src\flash_fwd_split_align_hdim192_bf16_sm80.cu`
+9. `csrc\flash_attn\src\flash_fwd_split_align_hdim192_fp16_causal_sm80.cu`
+10. `csrc\flash_attn\src\flash_fwd_split_align_hdim192_fp16_sm80.cu`
+11. `csrc\flash_attn\src\flash_fwd_split_align_hdim256_bf16_causal_sm80.cu`
+12. `csrc\flash_attn\src\flash_fwd_split_align_hdim256_bf16_sm80.cu`
+13. `csrc\flash_attn\src\flash_fwd_split_align_hdim256_fp16_causal_sm80.cu`
+14. `csrc\flash_attn\src\flash_fwd_split_align_hdim256_fp16_sm80.cu`
+15. `csrc\flash_attn\src\flash_fwd_split_align_hdim32_bf16_causal_sm80.cu`
+16. `csrc\flash_attn\src\flash_fwd_split_align_hdim32_bf16_sm80.cu`
+17. `csrc\flash_attn\src\flash_fwd_split_align_hdim32_fp16_causal_sm80.cu`
+18. `csrc\flash_attn\src\flash_fwd_split_align_hdim32_fp16_sm80.cu`
+19. `csrc\flash_attn\src\flash_fwd_split_align_hdim64_bf16_causal_sm80.cu`
+20. `csrc\flash_attn\src\flash_fwd_split_align_hdim64_bf16_sm80.cu`
+21. `csrc\flash_attn\src\flash_fwd_split_align_hdim64_fp16_causal_sm80.cu`
+22. `csrc\flash_attn\src\flash_fwd_split_align_hdim64_fp16_sm80.cu`
+23. `csrc\flash_attn\src\flash_fwd_split_align_hdim96_bf16_causal_sm80.cu`
+24. `csrc\flash_attn\src\flash_fwd_split_align_hdim96_bf16_sm80.cu`
+25. `csrc\flash_attn\src\flash_fwd_split_align_hdim96_fp16_causal_sm80.cu`
+26. `csrc\flash_attn\src\flash_fwd_split_align_hdim96_fp16_sm80.cu`
 
-### 修正された既存の分割カーネル (24ファイル)
-- `csrc\flash_attn\src\flash_fwd_split_hdim128_bf16_causal_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_hdim128_bf16_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_hdim128_fp16_causal_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_hdim128_fp16_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_hdim192_bf16_causal_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_hdim192_bf16_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_hdim192_fp16_causal_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_hdim192_fp16_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_hdim256_bf16_causal_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_hdim256_bf16_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_hdim256_fp16_causal_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_hdim256_fp16_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_hdim32_bf16_causal_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_hdim32_bf16_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_hdim32_fp16_causal_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_hdim32_fp16_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_hdim64_bf16_causal_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_hdim64_bf16_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_hdim64_fp16_causal_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_hdim64_fp16_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_hdim96_bf16_causal_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_hdim96_bf16_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_hdim96_fp16_causal_sm80.cu`
-- `csrc\flash_attn\src\flash_fwd_split_hdim96_fp16_sm80.cu`
+### Modified Existing Split Kernels (24 files)
+27. `csrc\flash_attn\src\flash_fwd_split_hdim128_bf16_causal_sm80.cu`
+28. `csrc\flash_attn\src\flash_fwd_split_hdim128_bf16_sm80.cu`
+29. `csrc\flash_attn\src\flash_fwd_split_hdim128_fp16_causal_sm80.cu`
+30. `csrc\flash_attn\src\flash_fwd_split_hdim128_fp16_sm80.cu`
+31. `csrc\flash_attn\src\flash_fwd_split_hdim192_bf16_causal_sm80.cu`
+32. `csrc\flash_attn\src\flash_fwd_split_hdim192_bf16_sm80.cu`
+33. `csrc\flash_attn\src\flash_fwd_split_hdim192_fp16_causal_sm80.cu`
+34. `csrc\flash_attn\src\flash_fwd_split_hdim192_fp16_sm80.cu`
+35. `csrc\flash_attn\src\flash_fwd_split_hdim256_bf16_causal_sm80.cu`
+36. `csrc\flash_attn\src\flash_fwd_split_hdim256_bf16_sm80.cu`
+37. `csrc\flash_attn\src\flash_fwd_split_hdim256_fp16_causal_sm80.cu`
+38. `csrc\flash_attn\src\flash_fwd_split_hdim256_fp16_sm80.cu`
+39. `csrc\flash_attn\src\flash_fwd_split_hdim32_bf16_causal_sm80.cu`
+40. `csrc\flash_attn\src\flash_fwd_split_hdim32_bf16_sm80.cu`
+41. `csrc\flash_attn\src\flash_fwd_split_hdim32_fp16_causal_sm80.cu`
+42. `csrc\flash_attn\src\flash_fwd_split_hdim32_fp16_sm80.cu`
+43. `csrc\flash_attn\src\flash_fwd_split_hdim64_bf16_causal_sm80.cu`
+44. `csrc\flash_attn\src\flash_fwd_split_hdim64_bf16_sm80.cu`
+45. `csrc\flash_attn\src\flash_fwd_split_hdim64_fp16_causal_sm80.cu`
+46. `csrc\flash_attn\src\flash_fwd_split_hdim64_fp16_sm80.cu`
+47. `csrc\flash_attn\src\flash_fwd_split_hdim96_bf16_causal_sm80.cu`
+48. `csrc\flash_attn\src\flash_fwd_split_hdim96_bf16_sm80.cu`
+49. `csrc\flash_attn\src\flash_fwd_split_hdim96_fp16_causal_sm80.cu`
+50. `csrc\flash_attn\src\flash_fwd_split_hdim96_fp16_sm80.cu`
 
 ---
-## 3. 各ファイルの詳細仕様およびソースコード
+## 3. Detailed Specifications & Full Source Code
 
-### 3.1 コアディスパッチおよび自動生成スクリプト
+### 3.1 Core Dispatch & Generator Scripts
 
-#### 📄 `csrc\flash_attn\src\generate_kernels.py`
-- **仕様**: 24個の `fwd_split_align` ファイルを動的に自動生成するPythonスクリプト。同時に、既存の `fwd_split` 側に対し `extern` 宣言を出力し、二重コンパイルを防止するロジックが追加されている。
+#### 📄 File 1/50: `csrc\flash_attn\src\generate_kernels.py`
+- **Specification**: A Python script that dynamically generates the 24 `fwd_split_align` files. It was updated to also append an `extern` declaration to the existing `fwd_split` files to prevent double compilation.
 ```python
 import argparse
 import itertools
@@ -204,8 +204,8 @@ if __name__ == "__main__":
 
 ```
 
-#### 📄 `csrc\flash_attn\src\flash_fwd_launch_template.h`
-- **仕様**: 全カーネルの呼び出し元ヘッダファイル。`params.num_splits == 1` の条件分岐を追加し、ブロック幅が最適化された `run_mha_fwd_splitkv_align` へディスパッチする処理を実装。
+#### 📄 File 2/50: `csrc\flash_attn\src\flash_fwd_launch_template.h`
+- **Specification**: The root header file for all kernel calls. It was modified to include a conditional branch for `params.num_splits == 1`, dispatching execution to the alignment-optimized `run_mha_fwd_splitkv_align` kernels.
 ```cpp
 /******************************************************************************
  * Copyright (c) 2023, Tri Dao.
@@ -536,11 +536,11 @@ void run_mha_fwd_hdim256(Flash_fwd_params &params, cudaStream_t stream) {
 
 ```
 
-### 3.2 インスタンス化カーネル群 (全48ファイル)
+### 3.2 Instantiated Kernel Group (48 Files)
 
-#### 📄 [新規] `csrc\flash_attn\src\flash_fwd_split_align_hdim32_fp16_causal_sm80.cu`
-- **Head Dimension**: `32` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Maskあり (`true`)
-- **仕様**: `num_splits == 1` の場合に使用されるアラインメント最適化カーネル。最適ブロック幅 `kBlockN_standard = 128` を用い、`run_mha_fwd_splitkv_align` を独立した翻訳単位として実体化する。
+#### 📄 File 3/50: [NEW] `csrc\flash_attn\src\flash_fwd_split_align_hdim32_fp16_causal_sm80.cu`
+- **Head Dimension**: `32` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Mask: Yes (`true`)
+- **Specification**: Alignment-optimized kernel used when `num_splits == 1`. It isolates the instantiation of `run_mha_fwd_splitkv_align` using the optimized block width `kBlockN_standard = 128` into its own translation unit.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -555,9 +555,9 @@ template void run_mha_fwd_splitkv_align<cutlass::half_t, 32, true>(Flash_fwd_par
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [修正] `csrc\flash_attn\src\flash_fwd_split_hdim32_fp16_causal_sm80.cu`
-- **Head Dimension**: `32` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Maskあり (`true`)
-- **仕様**: 上記アラインメント最適化カーネルの `extern` 宣言が追記された既存の分割カーネルファイル。メインディスパッチ側での二重実体化を防ぐ。
+#### 📄 File 4/50: [MODIFIED] `csrc\flash_attn\src\flash_fwd_split_hdim32_fp16_causal_sm80.cu`
+- **Head Dimension**: `32` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Mask: Yes (`true`)
+- **Specification**: The existing split kernel file. It was modified to include an `extern` declaration for the above alignment-optimized kernel, explicitly preventing the main dispatch tree from re-compiling it and triggering memory crashes.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -577,9 +577,9 @@ template void run_mha_fwd_splitkv_dispatch<cutlass::half_t, 32, true>(Flash_fwd_
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [新規] `csrc\flash_attn\src\flash_fwd_split_align_hdim32_fp16_sm80.cu`
-- **Head Dimension**: `32` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Maskなし (`false`)
-- **仕様**: `num_splits == 1` の場合に使用されるアラインメント最適化カーネル。最適ブロック幅 `kBlockN_standard = 128` を用い、`run_mha_fwd_splitkv_align` を独立した翻訳単位として実体化する。
+#### 📄 File 5/50: [NEW] `csrc\flash_attn\src\flash_fwd_split_align_hdim32_fp16_sm80.cu`
+- **Head Dimension**: `32` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Mask: No (`false`)
+- **Specification**: Alignment-optimized kernel used when `num_splits == 1`. It isolates the instantiation of `run_mha_fwd_splitkv_align` using the optimized block width `kBlockN_standard = 128` into its own translation unit.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -594,9 +594,9 @@ template void run_mha_fwd_splitkv_align<cutlass::half_t, 32, false>(Flash_fwd_pa
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [修正] `csrc\flash_attn\src\flash_fwd_split_hdim32_fp16_sm80.cu`
-- **Head Dimension**: `32` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Maskなし (`false`)
-- **仕様**: 上記アラインメント最適化カーネルの `extern` 宣言が追記された既存の分割カーネルファイル。メインディスパッチ側での二重実体化を防ぐ。
+#### 📄 File 6/50: [MODIFIED] `csrc\flash_attn\src\flash_fwd_split_hdim32_fp16_sm80.cu`
+- **Head Dimension**: `32` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Mask: No (`false`)
+- **Specification**: The existing split kernel file. It was modified to include an `extern` declaration for the above alignment-optimized kernel, explicitly preventing the main dispatch tree from re-compiling it and triggering memory crashes.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -616,9 +616,9 @@ template void run_mha_fwd_splitkv_dispatch<cutlass::half_t, 32, false>(Flash_fwd
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [新規] `csrc\flash_attn\src\flash_fwd_split_align_hdim32_bf16_causal_sm80.cu`
-- **Head Dimension**: `32` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Maskあり (`true`)
-- **仕様**: `num_splits == 1` の場合に使用されるアラインメント最適化カーネル。最適ブロック幅 `kBlockN_standard = 128` を用い、`run_mha_fwd_splitkv_align` を独立した翻訳単位として実体化する。
+#### 📄 File 7/50: [NEW] `csrc\flash_attn\src\flash_fwd_split_align_hdim32_bf16_causal_sm80.cu`
+- **Head Dimension**: `32` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Mask: Yes (`true`)
+- **Specification**: Alignment-optimized kernel used when `num_splits == 1`. It isolates the instantiation of `run_mha_fwd_splitkv_align` using the optimized block width `kBlockN_standard = 128` into its own translation unit.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -633,9 +633,9 @@ template void run_mha_fwd_splitkv_align<cutlass::bfloat16_t, 32, true>(Flash_fwd
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [修正] `csrc\flash_attn\src\flash_fwd_split_hdim32_bf16_causal_sm80.cu`
-- **Head Dimension**: `32` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Maskあり (`true`)
-- **仕様**: 上記アラインメント最適化カーネルの `extern` 宣言が追記された既存の分割カーネルファイル。メインディスパッチ側での二重実体化を防ぐ。
+#### 📄 File 8/50: [MODIFIED] `csrc\flash_attn\src\flash_fwd_split_hdim32_bf16_causal_sm80.cu`
+- **Head Dimension**: `32` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Mask: Yes (`true`)
+- **Specification**: The existing split kernel file. It was modified to include an `extern` declaration for the above alignment-optimized kernel, explicitly preventing the main dispatch tree from re-compiling it and triggering memory crashes.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -655,9 +655,9 @@ template void run_mha_fwd_splitkv_dispatch<cutlass::bfloat16_t, 32, true>(Flash_
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [新規] `csrc\flash_attn\src\flash_fwd_split_align_hdim32_bf16_sm80.cu`
-- **Head Dimension**: `32` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Maskなし (`false`)
-- **仕様**: `num_splits == 1` の場合に使用されるアラインメント最適化カーネル。最適ブロック幅 `kBlockN_standard = 128` を用い、`run_mha_fwd_splitkv_align` を独立した翻訳単位として実体化する。
+#### 📄 File 9/50: [NEW] `csrc\flash_attn\src\flash_fwd_split_align_hdim32_bf16_sm80.cu`
+- **Head Dimension**: `32` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Mask: No (`false`)
+- **Specification**: Alignment-optimized kernel used when `num_splits == 1`. It isolates the instantiation of `run_mha_fwd_splitkv_align` using the optimized block width `kBlockN_standard = 128` into its own translation unit.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -672,9 +672,9 @@ template void run_mha_fwd_splitkv_align<cutlass::bfloat16_t, 32, false>(Flash_fw
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [修正] `csrc\flash_attn\src\flash_fwd_split_hdim32_bf16_sm80.cu`
-- **Head Dimension**: `32` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Maskなし (`false`)
-- **仕様**: 上記アラインメント最適化カーネルの `extern` 宣言が追記された既存の分割カーネルファイル。メインディスパッチ側での二重実体化を防ぐ。
+#### 📄 File 10/50: [MODIFIED] `csrc\flash_attn\src\flash_fwd_split_hdim32_bf16_sm80.cu`
+- **Head Dimension**: `32` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Mask: No (`false`)
+- **Specification**: The existing split kernel file. It was modified to include an `extern` declaration for the above alignment-optimized kernel, explicitly preventing the main dispatch tree from re-compiling it and triggering memory crashes.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -694,9 +694,9 @@ template void run_mha_fwd_splitkv_dispatch<cutlass::bfloat16_t, 32, false>(Flash
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [新規] `csrc\flash_attn\src\flash_fwd_split_align_hdim64_fp16_causal_sm80.cu`
-- **Head Dimension**: `64` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Maskあり (`true`)
-- **仕様**: `num_splits == 1` の場合に使用されるアラインメント最適化カーネル。最適ブロック幅 `kBlockN_standard = 128` を用い、`run_mha_fwd_splitkv_align` を独立した翻訳単位として実体化する。
+#### 📄 File 11/50: [NEW] `csrc\flash_attn\src\flash_fwd_split_align_hdim64_fp16_causal_sm80.cu`
+- **Head Dimension**: `64` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Mask: Yes (`true`)
+- **Specification**: Alignment-optimized kernel used when `num_splits == 1`. It isolates the instantiation of `run_mha_fwd_splitkv_align` using the optimized block width `kBlockN_standard = 128` into its own translation unit.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -711,9 +711,9 @@ template void run_mha_fwd_splitkv_align<cutlass::half_t, 64, true>(Flash_fwd_par
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [修正] `csrc\flash_attn\src\flash_fwd_split_hdim64_fp16_causal_sm80.cu`
-- **Head Dimension**: `64` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Maskあり (`true`)
-- **仕様**: 上記アラインメント最適化カーネルの `extern` 宣言が追記された既存の分割カーネルファイル。メインディスパッチ側での二重実体化を防ぐ。
+#### 📄 File 12/50: [MODIFIED] `csrc\flash_attn\src\flash_fwd_split_hdim64_fp16_causal_sm80.cu`
+- **Head Dimension**: `64` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Mask: Yes (`true`)
+- **Specification**: The existing split kernel file. It was modified to include an `extern` declaration for the above alignment-optimized kernel, explicitly preventing the main dispatch tree from re-compiling it and triggering memory crashes.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -733,9 +733,9 @@ template void run_mha_fwd_splitkv_dispatch<cutlass::half_t, 64, true>(Flash_fwd_
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [新規] `csrc\flash_attn\src\flash_fwd_split_align_hdim64_fp16_sm80.cu`
-- **Head Dimension**: `64` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Maskなし (`false`)
-- **仕様**: `num_splits == 1` の場合に使用されるアラインメント最適化カーネル。最適ブロック幅 `kBlockN_standard = 128` を用い、`run_mha_fwd_splitkv_align` を独立した翻訳単位として実体化する。
+#### 📄 File 13/50: [NEW] `csrc\flash_attn\src\flash_fwd_split_align_hdim64_fp16_sm80.cu`
+- **Head Dimension**: `64` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Mask: No (`false`)
+- **Specification**: Alignment-optimized kernel used when `num_splits == 1`. It isolates the instantiation of `run_mha_fwd_splitkv_align` using the optimized block width `kBlockN_standard = 128` into its own translation unit.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -750,9 +750,9 @@ template void run_mha_fwd_splitkv_align<cutlass::half_t, 64, false>(Flash_fwd_pa
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [修正] `csrc\flash_attn\src\flash_fwd_split_hdim64_fp16_sm80.cu`
-- **Head Dimension**: `64` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Maskなし (`false`)
-- **仕様**: 上記アラインメント最適化カーネルの `extern` 宣言が追記された既存の分割カーネルファイル。メインディスパッチ側での二重実体化を防ぐ。
+#### 📄 File 14/50: [MODIFIED] `csrc\flash_attn\src\flash_fwd_split_hdim64_fp16_sm80.cu`
+- **Head Dimension**: `64` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Mask: No (`false`)
+- **Specification**: The existing split kernel file. It was modified to include an `extern` declaration for the above alignment-optimized kernel, explicitly preventing the main dispatch tree from re-compiling it and triggering memory crashes.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -772,9 +772,9 @@ template void run_mha_fwd_splitkv_dispatch<cutlass::half_t, 64, false>(Flash_fwd
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [新規] `csrc\flash_attn\src\flash_fwd_split_align_hdim64_bf16_causal_sm80.cu`
-- **Head Dimension**: `64` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Maskあり (`true`)
-- **仕様**: `num_splits == 1` の場合に使用されるアラインメント最適化カーネル。最適ブロック幅 `kBlockN_standard = 128` を用い、`run_mha_fwd_splitkv_align` を独立した翻訳単位として実体化する。
+#### 📄 File 15/50: [NEW] `csrc\flash_attn\src\flash_fwd_split_align_hdim64_bf16_causal_sm80.cu`
+- **Head Dimension**: `64` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Mask: Yes (`true`)
+- **Specification**: Alignment-optimized kernel used when `num_splits == 1`. It isolates the instantiation of `run_mha_fwd_splitkv_align` using the optimized block width `kBlockN_standard = 128` into its own translation unit.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -789,9 +789,9 @@ template void run_mha_fwd_splitkv_align<cutlass::bfloat16_t, 64, true>(Flash_fwd
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [修正] `csrc\flash_attn\src\flash_fwd_split_hdim64_bf16_causal_sm80.cu`
-- **Head Dimension**: `64` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Maskあり (`true`)
-- **仕様**: 上記アラインメント最適化カーネルの `extern` 宣言が追記された既存の分割カーネルファイル。メインディスパッチ側での二重実体化を防ぐ。
+#### 📄 File 16/50: [MODIFIED] `csrc\flash_attn\src\flash_fwd_split_hdim64_bf16_causal_sm80.cu`
+- **Head Dimension**: `64` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Mask: Yes (`true`)
+- **Specification**: The existing split kernel file. It was modified to include an `extern` declaration for the above alignment-optimized kernel, explicitly preventing the main dispatch tree from re-compiling it and triggering memory crashes.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -811,9 +811,9 @@ template void run_mha_fwd_splitkv_dispatch<cutlass::bfloat16_t, 64, true>(Flash_
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [新規] `csrc\flash_attn\src\flash_fwd_split_align_hdim64_bf16_sm80.cu`
-- **Head Dimension**: `64` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Maskなし (`false`)
-- **仕様**: `num_splits == 1` の場合に使用されるアラインメント最適化カーネル。最適ブロック幅 `kBlockN_standard = 128` を用い、`run_mha_fwd_splitkv_align` を独立した翻訳単位として実体化する。
+#### 📄 File 17/50: [NEW] `csrc\flash_attn\src\flash_fwd_split_align_hdim64_bf16_sm80.cu`
+- **Head Dimension**: `64` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Mask: No (`false`)
+- **Specification**: Alignment-optimized kernel used when `num_splits == 1`. It isolates the instantiation of `run_mha_fwd_splitkv_align` using the optimized block width `kBlockN_standard = 128` into its own translation unit.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -828,9 +828,9 @@ template void run_mha_fwd_splitkv_align<cutlass::bfloat16_t, 64, false>(Flash_fw
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [修正] `csrc\flash_attn\src\flash_fwd_split_hdim64_bf16_sm80.cu`
-- **Head Dimension**: `64` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Maskなし (`false`)
-- **仕様**: 上記アラインメント最適化カーネルの `extern` 宣言が追記された既存の分割カーネルファイル。メインディスパッチ側での二重実体化を防ぐ。
+#### 📄 File 18/50: [MODIFIED] `csrc\flash_attn\src\flash_fwd_split_hdim64_bf16_sm80.cu`
+- **Head Dimension**: `64` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Mask: No (`false`)
+- **Specification**: The existing split kernel file. It was modified to include an `extern` declaration for the above alignment-optimized kernel, explicitly preventing the main dispatch tree from re-compiling it and triggering memory crashes.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -850,9 +850,9 @@ template void run_mha_fwd_splitkv_dispatch<cutlass::bfloat16_t, 64, false>(Flash
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [新規] `csrc\flash_attn\src\flash_fwd_split_align_hdim96_fp16_causal_sm80.cu`
-- **Head Dimension**: `96` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Maskあり (`true`)
-- **仕様**: `num_splits == 1` の場合に使用されるアラインメント最適化カーネル。最適ブロック幅 `kBlockN_standard = 64` を用い、`run_mha_fwd_splitkv_align` を独立した翻訳単位として実体化する。
+#### 📄 File 19/50: [NEW] `csrc\flash_attn\src\flash_fwd_split_align_hdim96_fp16_causal_sm80.cu`
+- **Head Dimension**: `96` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Mask: Yes (`true`)
+- **Specification**: Alignment-optimized kernel used when `num_splits == 1`. It isolates the instantiation of `run_mha_fwd_splitkv_align` using the optimized block width `kBlockN_standard = 64` into its own translation unit.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -867,9 +867,9 @@ template void run_mha_fwd_splitkv_align<cutlass::half_t, 96, true>(Flash_fwd_par
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [修正] `csrc\flash_attn\src\flash_fwd_split_hdim96_fp16_causal_sm80.cu`
-- **Head Dimension**: `96` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Maskあり (`true`)
-- **仕様**: 上記アラインメント最適化カーネルの `extern` 宣言が追記された既存の分割カーネルファイル。メインディスパッチ側での二重実体化を防ぐ。
+#### 📄 File 20/50: [MODIFIED] `csrc\flash_attn\src\flash_fwd_split_hdim96_fp16_causal_sm80.cu`
+- **Head Dimension**: `96` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Mask: Yes (`true`)
+- **Specification**: The existing split kernel file. It was modified to include an `extern` declaration for the above alignment-optimized kernel, explicitly preventing the main dispatch tree from re-compiling it and triggering memory crashes.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -889,9 +889,9 @@ template void run_mha_fwd_splitkv_dispatch<cutlass::half_t, 96, true>(Flash_fwd_
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [新規] `csrc\flash_attn\src\flash_fwd_split_align_hdim96_fp16_sm80.cu`
-- **Head Dimension**: `96` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Maskなし (`false`)
-- **仕様**: `num_splits == 1` の場合に使用されるアラインメント最適化カーネル。最適ブロック幅 `kBlockN_standard = 64` を用い、`run_mha_fwd_splitkv_align` を独立した翻訳単位として実体化する。
+#### 📄 File 21/50: [NEW] `csrc\flash_attn\src\flash_fwd_split_align_hdim96_fp16_sm80.cu`
+- **Head Dimension**: `96` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Mask: No (`false`)
+- **Specification**: Alignment-optimized kernel used when `num_splits == 1`. It isolates the instantiation of `run_mha_fwd_splitkv_align` using the optimized block width `kBlockN_standard = 64` into its own translation unit.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -906,9 +906,9 @@ template void run_mha_fwd_splitkv_align<cutlass::half_t, 96, false>(Flash_fwd_pa
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [修正] `csrc\flash_attn\src\flash_fwd_split_hdim96_fp16_sm80.cu`
-- **Head Dimension**: `96` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Maskなし (`false`)
-- **仕様**: 上記アラインメント最適化カーネルの `extern` 宣言が追記された既存の分割カーネルファイル。メインディスパッチ側での二重実体化を防ぐ。
+#### 📄 File 22/50: [MODIFIED] `csrc\flash_attn\src\flash_fwd_split_hdim96_fp16_sm80.cu`
+- **Head Dimension**: `96` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Mask: No (`false`)
+- **Specification**: The existing split kernel file. It was modified to include an `extern` declaration for the above alignment-optimized kernel, explicitly preventing the main dispatch tree from re-compiling it and triggering memory crashes.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -928,9 +928,9 @@ template void run_mha_fwd_splitkv_dispatch<cutlass::half_t, 96, false>(Flash_fwd
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [新規] `csrc\flash_attn\src\flash_fwd_split_align_hdim96_bf16_causal_sm80.cu`
-- **Head Dimension**: `96` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Maskあり (`true`)
-- **仕様**: `num_splits == 1` の場合に使用されるアラインメント最適化カーネル。最適ブロック幅 `kBlockN_standard = 64` を用い、`run_mha_fwd_splitkv_align` を独立した翻訳単位として実体化する。
+#### 📄 File 23/50: [NEW] `csrc\flash_attn\src\flash_fwd_split_align_hdim96_bf16_causal_sm80.cu`
+- **Head Dimension**: `96` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Mask: Yes (`true`)
+- **Specification**: Alignment-optimized kernel used when `num_splits == 1`. It isolates the instantiation of `run_mha_fwd_splitkv_align` using the optimized block width `kBlockN_standard = 64` into its own translation unit.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -945,9 +945,9 @@ template void run_mha_fwd_splitkv_align<cutlass::bfloat16_t, 96, true>(Flash_fwd
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [修正] `csrc\flash_attn\src\flash_fwd_split_hdim96_bf16_causal_sm80.cu`
-- **Head Dimension**: `96` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Maskあり (`true`)
-- **仕様**: 上記アラインメント最適化カーネルの `extern` 宣言が追記された既存の分割カーネルファイル。メインディスパッチ側での二重実体化を防ぐ。
+#### 📄 File 24/50: [MODIFIED] `csrc\flash_attn\src\flash_fwd_split_hdim96_bf16_causal_sm80.cu`
+- **Head Dimension**: `96` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Mask: Yes (`true`)
+- **Specification**: The existing split kernel file. It was modified to include an `extern` declaration for the above alignment-optimized kernel, explicitly preventing the main dispatch tree from re-compiling it and triggering memory crashes.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -967,9 +967,9 @@ template void run_mha_fwd_splitkv_dispatch<cutlass::bfloat16_t, 96, true>(Flash_
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [新規] `csrc\flash_attn\src\flash_fwd_split_align_hdim96_bf16_sm80.cu`
-- **Head Dimension**: `96` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Maskなし (`false`)
-- **仕様**: `num_splits == 1` の場合に使用されるアラインメント最適化カーネル。最適ブロック幅 `kBlockN_standard = 64` を用い、`run_mha_fwd_splitkv_align` を独立した翻訳単位として実体化する。
+#### 📄 File 25/50: [NEW] `csrc\flash_attn\src\flash_fwd_split_align_hdim96_bf16_sm80.cu`
+- **Head Dimension**: `96` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Mask: No (`false`)
+- **Specification**: Alignment-optimized kernel used when `num_splits == 1`. It isolates the instantiation of `run_mha_fwd_splitkv_align` using the optimized block width `kBlockN_standard = 64` into its own translation unit.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -984,9 +984,9 @@ template void run_mha_fwd_splitkv_align<cutlass::bfloat16_t, 96, false>(Flash_fw
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [修正] `csrc\flash_attn\src\flash_fwd_split_hdim96_bf16_sm80.cu`
-- **Head Dimension**: `96` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Maskなし (`false`)
-- **仕様**: 上記アラインメント最適化カーネルの `extern` 宣言が追記された既存の分割カーネルファイル。メインディスパッチ側での二重実体化を防ぐ。
+#### 📄 File 26/50: [MODIFIED] `csrc\flash_attn\src\flash_fwd_split_hdim96_bf16_sm80.cu`
+- **Head Dimension**: `96` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Mask: No (`false`)
+- **Specification**: The existing split kernel file. It was modified to include an `extern` declaration for the above alignment-optimized kernel, explicitly preventing the main dispatch tree from re-compiling it and triggering memory crashes.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -1006,9 +1006,9 @@ template void run_mha_fwd_splitkv_dispatch<cutlass::bfloat16_t, 96, false>(Flash
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [新規] `csrc\flash_attn\src\flash_fwd_split_align_hdim128_fp16_causal_sm80.cu`
-- **Head Dimension**: `128` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Maskあり (`true`)
-- **仕様**: `num_splits == 1` の場合に使用されるアラインメント最適化カーネル。最適ブロック幅 `kBlockN_standard = 64` を用い、`run_mha_fwd_splitkv_align` を独立した翻訳単位として実体化する。
+#### 📄 File 27/50: [NEW] `csrc\flash_attn\src\flash_fwd_split_align_hdim128_fp16_causal_sm80.cu`
+- **Head Dimension**: `128` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Mask: Yes (`true`)
+- **Specification**: Alignment-optimized kernel used when `num_splits == 1`. It isolates the instantiation of `run_mha_fwd_splitkv_align` using the optimized block width `kBlockN_standard = 64` into its own translation unit.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -1023,9 +1023,9 @@ template void run_mha_fwd_splitkv_align<cutlass::half_t, 128, true>(Flash_fwd_pa
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [修正] `csrc\flash_attn\src\flash_fwd_split_hdim128_fp16_causal_sm80.cu`
-- **Head Dimension**: `128` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Maskあり (`true`)
-- **仕様**: 上記アラインメント最適化カーネルの `extern` 宣言が追記された既存の分割カーネルファイル。メインディスパッチ側での二重実体化を防ぐ。
+#### 📄 File 28/50: [MODIFIED] `csrc\flash_attn\src\flash_fwd_split_hdim128_fp16_causal_sm80.cu`
+- **Head Dimension**: `128` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Mask: Yes (`true`)
+- **Specification**: The existing split kernel file. It was modified to include an `extern` declaration for the above alignment-optimized kernel, explicitly preventing the main dispatch tree from re-compiling it and triggering memory crashes.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -1045,9 +1045,9 @@ template void run_mha_fwd_splitkv_dispatch<cutlass::half_t, 128, true>(Flash_fwd
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [新規] `csrc\flash_attn\src\flash_fwd_split_align_hdim128_fp16_sm80.cu`
-- **Head Dimension**: `128` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Maskなし (`false`)
-- **仕様**: `num_splits == 1` の場合に使用されるアラインメント最適化カーネル。最適ブロック幅 `kBlockN_standard = 64` を用い、`run_mha_fwd_splitkv_align` を独立した翻訳単位として実体化する。
+#### 📄 File 29/50: [NEW] `csrc\flash_attn\src\flash_fwd_split_align_hdim128_fp16_sm80.cu`
+- **Head Dimension**: `128` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Mask: No (`false`)
+- **Specification**: Alignment-optimized kernel used when `num_splits == 1`. It isolates the instantiation of `run_mha_fwd_splitkv_align` using the optimized block width `kBlockN_standard = 64` into its own translation unit.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -1062,9 +1062,9 @@ template void run_mha_fwd_splitkv_align<cutlass::half_t, 128, false>(Flash_fwd_p
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [修正] `csrc\flash_attn\src\flash_fwd_split_hdim128_fp16_sm80.cu`
-- **Head Dimension**: `128` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Maskなし (`false`)
-- **仕様**: 上記アラインメント最適化カーネルの `extern` 宣言が追記された既存の分割カーネルファイル。メインディスパッチ側での二重実体化を防ぐ。
+#### 📄 File 30/50: [MODIFIED] `csrc\flash_attn\src\flash_fwd_split_hdim128_fp16_sm80.cu`
+- **Head Dimension**: `128` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Mask: No (`false`)
+- **Specification**: The existing split kernel file. It was modified to include an `extern` declaration for the above alignment-optimized kernel, explicitly preventing the main dispatch tree from re-compiling it and triggering memory crashes.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -1084,9 +1084,9 @@ template void run_mha_fwd_splitkv_dispatch<cutlass::half_t, 128, false>(Flash_fw
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [新規] `csrc\flash_attn\src\flash_fwd_split_align_hdim128_bf16_causal_sm80.cu`
-- **Head Dimension**: `128` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Maskあり (`true`)
-- **仕様**: `num_splits == 1` の場合に使用されるアラインメント最適化カーネル。最適ブロック幅 `kBlockN_standard = 64` を用い、`run_mha_fwd_splitkv_align` を独立した翻訳単位として実体化する。
+#### 📄 File 31/50: [NEW] `csrc\flash_attn\src\flash_fwd_split_align_hdim128_bf16_causal_sm80.cu`
+- **Head Dimension**: `128` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Mask: Yes (`true`)
+- **Specification**: Alignment-optimized kernel used when `num_splits == 1`. It isolates the instantiation of `run_mha_fwd_splitkv_align` using the optimized block width `kBlockN_standard = 64` into its own translation unit.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -1101,9 +1101,9 @@ template void run_mha_fwd_splitkv_align<cutlass::bfloat16_t, 128, true>(Flash_fw
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [修正] `csrc\flash_attn\src\flash_fwd_split_hdim128_bf16_causal_sm80.cu`
-- **Head Dimension**: `128` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Maskあり (`true`)
-- **仕様**: 上記アラインメント最適化カーネルの `extern` 宣言が追記された既存の分割カーネルファイル。メインディスパッチ側での二重実体化を防ぐ。
+#### 📄 File 32/50: [MODIFIED] `csrc\flash_attn\src\flash_fwd_split_hdim128_bf16_causal_sm80.cu`
+- **Head Dimension**: `128` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Mask: Yes (`true`)
+- **Specification**: The existing split kernel file. It was modified to include an `extern` declaration for the above alignment-optimized kernel, explicitly preventing the main dispatch tree from re-compiling it and triggering memory crashes.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -1123,9 +1123,9 @@ template void run_mha_fwd_splitkv_dispatch<cutlass::bfloat16_t, 128, true>(Flash
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [新規] `csrc\flash_attn\src\flash_fwd_split_align_hdim128_bf16_sm80.cu`
-- **Head Dimension**: `128` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Maskなし (`false`)
-- **仕様**: `num_splits == 1` の場合に使用されるアラインメント最適化カーネル。最適ブロック幅 `kBlockN_standard = 64` を用い、`run_mha_fwd_splitkv_align` を独立した翻訳単位として実体化する。
+#### 📄 File 33/50: [NEW] `csrc\flash_attn\src\flash_fwd_split_align_hdim128_bf16_sm80.cu`
+- **Head Dimension**: `128` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Mask: No (`false`)
+- **Specification**: Alignment-optimized kernel used when `num_splits == 1`. It isolates the instantiation of `run_mha_fwd_splitkv_align` using the optimized block width `kBlockN_standard = 64` into its own translation unit.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -1140,9 +1140,9 @@ template void run_mha_fwd_splitkv_align<cutlass::bfloat16_t, 128, false>(Flash_f
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [修正] `csrc\flash_attn\src\flash_fwd_split_hdim128_bf16_sm80.cu`
-- **Head Dimension**: `128` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Maskなし (`false`)
-- **仕様**: 上記アラインメント最適化カーネルの `extern` 宣言が追記された既存の分割カーネルファイル。メインディスパッチ側での二重実体化を防ぐ。
+#### 📄 File 34/50: [MODIFIED] `csrc\flash_attn\src\flash_fwd_split_hdim128_bf16_sm80.cu`
+- **Head Dimension**: `128` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Mask: No (`false`)
+- **Specification**: The existing split kernel file. It was modified to include an `extern` declaration for the above alignment-optimized kernel, explicitly preventing the main dispatch tree from re-compiling it and triggering memory crashes.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -1162,9 +1162,9 @@ template void run_mha_fwd_splitkv_dispatch<cutlass::bfloat16_t, 128, false>(Flas
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [新規] `csrc\flash_attn\src\flash_fwd_split_align_hdim192_fp16_causal_sm80.cu`
-- **Head Dimension**: `192` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Maskあり (`true`)
-- **仕様**: `num_splits == 1` の場合に使用されるアラインメント最適化カーネル。最適ブロック幅 `kBlockN_standard = 64` を用い、`run_mha_fwd_splitkv_align` を独立した翻訳単位として実体化する。
+#### 📄 File 35/50: [NEW] `csrc\flash_attn\src\flash_fwd_split_align_hdim192_fp16_causal_sm80.cu`
+- **Head Dimension**: `192` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Mask: Yes (`true`)
+- **Specification**: Alignment-optimized kernel used when `num_splits == 1`. It isolates the instantiation of `run_mha_fwd_splitkv_align` using the optimized block width `kBlockN_standard = 64` into its own translation unit.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -1179,9 +1179,9 @@ template void run_mha_fwd_splitkv_align<cutlass::half_t, 192, true>(Flash_fwd_pa
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [修正] `csrc\flash_attn\src\flash_fwd_split_hdim192_fp16_causal_sm80.cu`
-- **Head Dimension**: `192` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Maskあり (`true`)
-- **仕様**: 上記アラインメント最適化カーネルの `extern` 宣言が追記された既存の分割カーネルファイル。メインディスパッチ側での二重実体化を防ぐ。
+#### 📄 File 36/50: [MODIFIED] `csrc\flash_attn\src\flash_fwd_split_hdim192_fp16_causal_sm80.cu`
+- **Head Dimension**: `192` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Mask: Yes (`true`)
+- **Specification**: The existing split kernel file. It was modified to include an `extern` declaration for the above alignment-optimized kernel, explicitly preventing the main dispatch tree from re-compiling it and triggering memory crashes.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -1201,9 +1201,9 @@ template void run_mha_fwd_splitkv_dispatch<cutlass::half_t, 192, true>(Flash_fwd
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [新規] `csrc\flash_attn\src\flash_fwd_split_align_hdim192_fp16_sm80.cu`
-- **Head Dimension**: `192` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Maskなし (`false`)
-- **仕様**: `num_splits == 1` の場合に使用されるアラインメント最適化カーネル。最適ブロック幅 `kBlockN_standard = 64` を用い、`run_mha_fwd_splitkv_align` を独立した翻訳単位として実体化する。
+#### 📄 File 37/50: [NEW] `csrc\flash_attn\src\flash_fwd_split_align_hdim192_fp16_sm80.cu`
+- **Head Dimension**: `192` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Mask: No (`false`)
+- **Specification**: Alignment-optimized kernel used when `num_splits == 1`. It isolates the instantiation of `run_mha_fwd_splitkv_align` using the optimized block width `kBlockN_standard = 64` into its own translation unit.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -1218,9 +1218,9 @@ template void run_mha_fwd_splitkv_align<cutlass::half_t, 192, false>(Flash_fwd_p
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [修正] `csrc\flash_attn\src\flash_fwd_split_hdim192_fp16_sm80.cu`
-- **Head Dimension**: `192` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Maskなし (`false`)
-- **仕様**: 上記アラインメント最適化カーネルの `extern` 宣言が追記された既存の分割カーネルファイル。メインディスパッチ側での二重実体化を防ぐ。
+#### 📄 File 38/50: [MODIFIED] `csrc\flash_attn\src\flash_fwd_split_hdim192_fp16_sm80.cu`
+- **Head Dimension**: `192` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Mask: No (`false`)
+- **Specification**: The existing split kernel file. It was modified to include an `extern` declaration for the above alignment-optimized kernel, explicitly preventing the main dispatch tree from re-compiling it and triggering memory crashes.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -1240,9 +1240,9 @@ template void run_mha_fwd_splitkv_dispatch<cutlass::half_t, 192, false>(Flash_fw
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [新規] `csrc\flash_attn\src\flash_fwd_split_align_hdim192_bf16_causal_sm80.cu`
-- **Head Dimension**: `192` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Maskあり (`true`)
-- **仕様**: `num_splits == 1` の場合に使用されるアラインメント最適化カーネル。最適ブロック幅 `kBlockN_standard = 64` を用い、`run_mha_fwd_splitkv_align` を独立した翻訳単位として実体化する。
+#### 📄 File 39/50: [NEW] `csrc\flash_attn\src\flash_fwd_split_align_hdim192_bf16_causal_sm80.cu`
+- **Head Dimension**: `192` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Mask: Yes (`true`)
+- **Specification**: Alignment-optimized kernel used when `num_splits == 1`. It isolates the instantiation of `run_mha_fwd_splitkv_align` using the optimized block width `kBlockN_standard = 64` into its own translation unit.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -1257,9 +1257,9 @@ template void run_mha_fwd_splitkv_align<cutlass::bfloat16_t, 192, true>(Flash_fw
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [修正] `csrc\flash_attn\src\flash_fwd_split_hdim192_bf16_causal_sm80.cu`
-- **Head Dimension**: `192` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Maskあり (`true`)
-- **仕様**: 上記アラインメント最適化カーネルの `extern` 宣言が追記された既存の分割カーネルファイル。メインディスパッチ側での二重実体化を防ぐ。
+#### 📄 File 40/50: [MODIFIED] `csrc\flash_attn\src\flash_fwd_split_hdim192_bf16_causal_sm80.cu`
+- **Head Dimension**: `192` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Mask: Yes (`true`)
+- **Specification**: The existing split kernel file. It was modified to include an `extern` declaration for the above alignment-optimized kernel, explicitly preventing the main dispatch tree from re-compiling it and triggering memory crashes.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -1279,9 +1279,9 @@ template void run_mha_fwd_splitkv_dispatch<cutlass::bfloat16_t, 192, true>(Flash
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [新規] `csrc\flash_attn\src\flash_fwd_split_align_hdim192_bf16_sm80.cu`
-- **Head Dimension**: `192` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Maskなし (`false`)
-- **仕様**: `num_splits == 1` の場合に使用されるアラインメント最適化カーネル。最適ブロック幅 `kBlockN_standard = 64` を用い、`run_mha_fwd_splitkv_align` を独立した翻訳単位として実体化する。
+#### 📄 File 41/50: [NEW] `csrc\flash_attn\src\flash_fwd_split_align_hdim192_bf16_sm80.cu`
+- **Head Dimension**: `192` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Mask: No (`false`)
+- **Specification**: Alignment-optimized kernel used when `num_splits == 1`. It isolates the instantiation of `run_mha_fwd_splitkv_align` using the optimized block width `kBlockN_standard = 64` into its own translation unit.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -1296,9 +1296,9 @@ template void run_mha_fwd_splitkv_align<cutlass::bfloat16_t, 192, false>(Flash_f
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [修正] `csrc\flash_attn\src\flash_fwd_split_hdim192_bf16_sm80.cu`
-- **Head Dimension**: `192` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Maskなし (`false`)
-- **仕様**: 上記アラインメント最適化カーネルの `extern` 宣言が追記された既存の分割カーネルファイル。メインディスパッチ側での二重実体化を防ぐ。
+#### 📄 File 42/50: [MODIFIED] `csrc\flash_attn\src\flash_fwd_split_hdim192_bf16_sm80.cu`
+- **Head Dimension**: `192` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Mask: No (`false`)
+- **Specification**: The existing split kernel file. It was modified to include an `extern` declaration for the above alignment-optimized kernel, explicitly preventing the main dispatch tree from re-compiling it and triggering memory crashes.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -1318,9 +1318,9 @@ template void run_mha_fwd_splitkv_dispatch<cutlass::bfloat16_t, 192, false>(Flas
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [新規] `csrc\flash_attn\src\flash_fwd_split_align_hdim256_fp16_causal_sm80.cu`
-- **Head Dimension**: `256` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Maskあり (`true`)
-- **仕様**: `num_splits == 1` の場合に使用されるアラインメント最適化カーネル。最適ブロック幅 `kBlockN_standard = 64` を用い、`run_mha_fwd_splitkv_align` を独立した翻訳単位として実体化する。
+#### 📄 File 43/50: [NEW] `csrc\flash_attn\src\flash_fwd_split_align_hdim256_fp16_causal_sm80.cu`
+- **Head Dimension**: `256` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Mask: Yes (`true`)
+- **Specification**: Alignment-optimized kernel used when `num_splits == 1`. It isolates the instantiation of `run_mha_fwd_splitkv_align` using the optimized block width `kBlockN_standard = 64` into its own translation unit.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -1335,9 +1335,9 @@ template void run_mha_fwd_splitkv_align<cutlass::half_t, 256, true>(Flash_fwd_pa
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [修正] `csrc\flash_attn\src\flash_fwd_split_hdim256_fp16_causal_sm80.cu`
-- **Head Dimension**: `256` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Maskあり (`true`)
-- **仕様**: 上記アラインメント最適化カーネルの `extern` 宣言が追記された既存の分割カーネルファイル。メインディスパッチ側での二重実体化を防ぐ。
+#### 📄 File 44/50: [MODIFIED] `csrc\flash_attn\src\flash_fwd_split_hdim256_fp16_causal_sm80.cu`
+- **Head Dimension**: `256` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Mask: Yes (`true`)
+- **Specification**: The existing split kernel file. It was modified to include an `extern` declaration for the above alignment-optimized kernel, explicitly preventing the main dispatch tree from re-compiling it and triggering memory crashes.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -1357,9 +1357,9 @@ template void run_mha_fwd_splitkv_dispatch<cutlass::half_t, 256, true>(Flash_fwd
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [新規] `csrc\flash_attn\src\flash_fwd_split_align_hdim256_fp16_sm80.cu`
-- **Head Dimension**: `256` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Maskなし (`false`)
-- **仕様**: `num_splits == 1` の場合に使用されるアラインメント最適化カーネル。最適ブロック幅 `kBlockN_standard = 64` を用い、`run_mha_fwd_splitkv_align` を独立した翻訳単位として実体化する。
+#### 📄 File 45/50: [NEW] `csrc\flash_attn\src\flash_fwd_split_align_hdim256_fp16_sm80.cu`
+- **Head Dimension**: `256` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Mask: No (`false`)
+- **Specification**: Alignment-optimized kernel used when `num_splits == 1`. It isolates the instantiation of `run_mha_fwd_splitkv_align` using the optimized block width `kBlockN_standard = 64` into its own translation unit.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -1374,9 +1374,9 @@ template void run_mha_fwd_splitkv_align<cutlass::half_t, 256, false>(Flash_fwd_p
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [修正] `csrc\flash_attn\src\flash_fwd_split_hdim256_fp16_sm80.cu`
-- **Head Dimension**: `256` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Maskなし (`false`)
-- **仕様**: 上記アラインメント最適化カーネルの `extern` 宣言が追記された既存の分割カーネルファイル。メインディスパッチ側での二重実体化を防ぐ。
+#### 📄 File 46/50: [MODIFIED] `csrc\flash_attn\src\flash_fwd_split_hdim256_fp16_sm80.cu`
+- **Head Dimension**: `256` | **Data Type**: `fp16` (`cutlass::half_t`) | **Causal Mask**: Causal Mask: No (`false`)
+- **Specification**: The existing split kernel file. It was modified to include an `extern` declaration for the above alignment-optimized kernel, explicitly preventing the main dispatch tree from re-compiling it and triggering memory crashes.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -1396,9 +1396,9 @@ template void run_mha_fwd_splitkv_dispatch<cutlass::half_t, 256, false>(Flash_fw
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [新規] `csrc\flash_attn\src\flash_fwd_split_align_hdim256_bf16_causal_sm80.cu`
-- **Head Dimension**: `256` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Maskあり (`true`)
-- **仕様**: `num_splits == 1` の場合に使用されるアラインメント最適化カーネル。最適ブロック幅 `kBlockN_standard = 64` を用い、`run_mha_fwd_splitkv_align` を独立した翻訳単位として実体化する。
+#### 📄 File 47/50: [NEW] `csrc\flash_attn\src\flash_fwd_split_align_hdim256_bf16_causal_sm80.cu`
+- **Head Dimension**: `256` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Mask: Yes (`true`)
+- **Specification**: Alignment-optimized kernel used when `num_splits == 1`. It isolates the instantiation of `run_mha_fwd_splitkv_align` using the optimized block width `kBlockN_standard = 64` into its own translation unit.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -1413,9 +1413,9 @@ template void run_mha_fwd_splitkv_align<cutlass::bfloat16_t, 256, true>(Flash_fw
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [修正] `csrc\flash_attn\src\flash_fwd_split_hdim256_bf16_causal_sm80.cu`
-- **Head Dimension**: `256` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Maskあり (`true`)
-- **仕様**: 上記アラインメント最適化カーネルの `extern` 宣言が追記された既存の分割カーネルファイル。メインディスパッチ側での二重実体化を防ぐ。
+#### 📄 File 48/50: [MODIFIED] `csrc\flash_attn\src\flash_fwd_split_hdim256_bf16_causal_sm80.cu`
+- **Head Dimension**: `256` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Mask: Yes (`true`)
+- **Specification**: The existing split kernel file. It was modified to include an `extern` declaration for the above alignment-optimized kernel, explicitly preventing the main dispatch tree from re-compiling it and triggering memory crashes.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -1435,9 +1435,9 @@ template void run_mha_fwd_splitkv_dispatch<cutlass::bfloat16_t, 256, true>(Flash
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [新規] `csrc\flash_attn\src\flash_fwd_split_align_hdim256_bf16_sm80.cu`
-- **Head Dimension**: `256` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Maskなし (`false`)
-- **仕様**: `num_splits == 1` の場合に使用されるアラインメント最適化カーネル。最適ブロック幅 `kBlockN_standard = 64` を用い、`run_mha_fwd_splitkv_align` を独立した翻訳単位として実体化する。
+#### 📄 File 49/50: [NEW] `csrc\flash_attn\src\flash_fwd_split_align_hdim256_bf16_sm80.cu`
+- **Head Dimension**: `256` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Mask: No (`false`)
+- **Specification**: Alignment-optimized kernel used when `num_splits == 1`. It isolates the instantiation of `run_mha_fwd_splitkv_align` using the optimized block width `kBlockN_standard = 64` into its own translation unit.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.
@@ -1452,9 +1452,9 @@ template void run_mha_fwd_splitkv_align<cutlass::bfloat16_t, 256, false>(Flash_f
 } // namespace FLASH_NAMESPACE
 ```
 
-#### 📄 [修正] `csrc\flash_attn\src\flash_fwd_split_hdim256_bf16_sm80.cu`
-- **Head Dimension**: `256` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Maskなし (`false`)
-- **仕様**: 上記アラインメント最適化カーネルの `extern` 宣言が追記された既存の分割カーネルファイル。メインディスパッチ側での二重実体化を防ぐ。
+#### 📄 File 50/50: [MODIFIED] `csrc\flash_attn\src\flash_fwd_split_hdim256_bf16_sm80.cu`
+- **Head Dimension**: `256` | **Data Type**: `bf16` (`cutlass::bfloat16_t`) | **Causal Mask**: Causal Mask: No (`false`)
+- **Specification**: The existing split kernel file. It was modified to include an `extern` declaration for the above alignment-optimized kernel, explicitly preventing the main dispatch tree from re-compiling it and triggering memory crashes.
 ```cpp
 // Copyright (c) 2024, Tri Dao.
 // Splitting the different head dimensions to different files to speed up compilation.

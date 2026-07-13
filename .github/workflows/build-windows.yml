@@ -15,7 +15,7 @@ jobs:
       CUDA_ARCH: "100;120;121"
       CXX11_ABI: "FALSE"
       # Suppresses the Node 20 deprecation warning for actions that haven't updated yet
-      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true 
+      # ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true 
 
     steps:
       - name: Enable Git long paths

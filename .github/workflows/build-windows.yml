@@ -12,7 +12,8 @@ jobs:
     runs-on: windows-latest
     
     env:
-      CUDA_ARCH: "100;120;121"
+      #CUDA_ARCH: "100;120;121"
+      CUDA_ARCH: "120"
       CXX11_ABI: "FALSE"
       # Suppresses the Node 20 deprecation warning for actions that haven't updated yet
       # ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true 

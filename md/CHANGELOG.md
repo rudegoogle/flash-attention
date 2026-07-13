@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.6 — 2026-07-13
+
+- **Summary:** Fork release **v1.6** / package **`flash_attn` 2.9.2** — Official merge of the `split_align` architecture. Extracted the `num_splits == 1` forward pass alignment kernels into 24 independent compilation units (`flash_fwd_split_align_*.cu`) to resolve NVIDIA `ptxas` compiler timeouts and serial compilation crashes. To bypass the Windows MSVC 2GB linker limit (LNK1189) caused by compiling these massive object files, the build scripts were physically split into `bat2` (Blackwell: `100;120;121`) and `bat3` (Ampere/Hopper: `80;89;90`). Dynamic runtime versioning implemented in `__init__.py` to correctly branch between `2.9.1` and `2.9.2`.
+- **Release notes:** [v1.6_RELEASE.md](v1.6_RELEASE.md) | **Technical Spec:** [split_align_kernels_explanation.md](split_align_kernels_explanation.md)
+
 ## v1.5 — 2026-07-10
 
 - **Summary:** Fork release **v1.5** — Windows build fixes for PyTorch **2.13.0+cu13.2** under MSVC. Resolved the MSVC compiler overload resolution ambiguity (C2666) by introducing exact-match `operator==` and `operator!=` for `c10::ArrayRef<T>` template in namespace `c10`. Upgraded default C++ standard flags to C++20 (`-std=c++20` / `/std:c++20`) in `setup.py` to support C++20 modern syntax features (such as designated initializers and bitfield member initializers) used in PyTorch 2.13.0's headers.

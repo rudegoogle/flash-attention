@@ -3,12 +3,12 @@ rem ============================================================================
 rem FlashAttention Windows wheel builder (canonical entry for this repo copy).
 rem - Uses FLASH_ATTENTION_FORCE_BUILD=TRUE: always compiles from source (no GitHub wheel download).
 rem - Run with the SAME python.exe you use at runtime (e.g. ComfyUI python_embeded).
-rem Optional args (repeatable): FORCE_CXX11_ABI TRUE|FALSE   CUDA_ARCH 80;90;100;120
+rem Optional args (repeatable): FORCE_CXX11_ABI TRUE|FALSE   CUDA_ARCH 80;89;90;100;120;121
 rem For torch 2.11+cu130, ensure that python has torch.version.cuda major 13 (rename step uses it).
 rem =============================================================================
 setlocal enabledelayedexpansion
 
-set MAX_JOBS=4
+set MAX_JOBS=6
 
 :parseArgs
 rem Assigning a value to MAX_JOBS via a variable does not work in ninja, I don't know why

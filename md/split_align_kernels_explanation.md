@@ -1,4 +1,4 @@
-# FlashAttention v2.9.2: split_align Architecture Technical Specification (English & Numbered Edition)
+# FlashAttention v2.9.2: split_align Architecture Technical Specification
 
 ## 1. Overview
 

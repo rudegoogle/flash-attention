@@ -10,6 +10,8 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
+    # NEW: Extend the timeout to 720 minutes (12 hours) to allow MAX_JOBS=1 to finish
+    timeout-minutes: 720
     
     env:
       #CUDA_ARCH: "100;120;121"
